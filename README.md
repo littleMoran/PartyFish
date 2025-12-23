@@ -53,10 +53,11 @@ PartyFish 是一款基于图像识别的自动钓鱼工具，支持多分辨率�
 | 版本 | 下载链接 | 提取码 |
 |------|----------|--------|
 | **v2.0** (旧版本) | [🔗 蓝奏云下载](https://wwaqq.lanzouu.com/b0187zi2xg) | `fish` |
-| **v2.2** (最新) | [🔗 蓝奏云下载](https://wwasj.lanzouu.com/iGc0l3e9q4he) | `fish` |
+| **v2.3** (最新) | [🔗 蓝奏云下载](https://wwasj.lanzouu.com/iJYOD3eaaebi) | `fish` |
 
 > 💡 也可以前往 [Releases 页面](https://github.com/FADEDTUMI/PartyFish/releases) 查看所有版本
-
+> ---
+> 💡 也可以前往 [蓝奏云 页面](https://wwasj.lanzouu.com/b00181gfve | `62md` |) 查看所有版本
 ### 📂 安装步骤
 
 1. **下载** - 从上方链接下载压缩包
@@ -213,6 +214,11 @@ PartyFish/
 
 ### v2.2 (2025-12-23)
 - 修复了传奇鱼不截图和记录
+
+---
+### v2.3 (2025-12-23)
+- 可能修复自动钓鱼时自动加时会让鱼跑了
+- 新添加鼠标侧键热键(禁用鼠标左右和中键)
 
 ---
 ## 📝 许可证
