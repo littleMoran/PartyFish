@@ -54,10 +54,9 @@ PartyFish 是一款基于图像识别的自动钓鱼工具，支持多分辨率�
 |------|----------|--------|
 | **v2.0** (旧版本) | [🔗 蓝奏云下载](https://wwaqq.lanzouu.com/b0187zi2xg) | `fish` |
 | **v2.3** (最新) | [🔗 蓝奏云下载](https://wwasj.lanzouu.com/iJYOD3eaaebi) | `fish` |
+| 查看所有版本|[蓝奏云 页面](https://wwasj.lanzouu.com/b00181gfve) |`62md`| 查看所有版本
 
 > 💡 也可以前往 [Releases 页面](https://github.com/FADEDTUMI/PartyFish/releases) 查看所有版本
-> ---
-> 💡 也可以前往 [蓝奏云 页面](https://wwasj.lanzouu.com/b00181gfve | `62md` |) 查看所有版本
 ### 📂 安装步骤
 
 1. **下载** - 从上方链接下载压缩包
