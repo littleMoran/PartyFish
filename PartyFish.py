@@ -393,6 +393,9 @@ def load_parameters():
                 TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
             elif resolution_choice == "4K":
                 TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
+            elif resolution_choice == "current":
+                # 使用当前系统分辨率
+                TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
             elif resolution_choice == "自定义":
                 TARGET_WIDTH = params.get("custom_width", 2560)
                 TARGET_HEIGHT = params.get("custom_height", 1440)
@@ -456,6 +459,12 @@ def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paog
                 TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
             elif resolution_choice == "4K":
                 TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
+            elif resolution_choice == "current":
+                # 使用当前系统分辨率
+                TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
+                # 更新输入框显示，确保用户看到实际应用的值
+                custom_width_var.set(str(TARGET_WIDTH))
+                custom_height_var.set(str(TARGET_HEIGHT))
             elif resolution_choice == "自定义":
                 # 自定义分辨率限制
                 min_width, max_width = 800, 7680
@@ -506,7 +515,7 @@ def create_gui():
     root = ttkb.Window(themename="darkly")  # 使用深色主题
     root.title("🎣 PartyFish 自动钓鱼助手")
     root.geometry("1110x855")  # 增大初始高度，确保所有信息完整显示
-    root.minsize(700, 500)    # 调整最小尺寸，提供更好的初始体验
+    root.minsize(840, 500)    # 调整最小尺寸，提供更好的初始体验
     root.maxsize(2560, 1440)   # 调整最大尺寸，支持更大的显示器
     root.resizable(True, True)  # 允许调整大小
 
@@ -976,8 +985,8 @@ def create_gui():
     # 分辨率选择按钮组（使用2x2网格布局）
     res_btn_frame = ttkb.Frame(resolution_card)
     res_btn_frame.pack(fill=X, pady=(0, 6))
-
-    resolutions = [("1080P", "1080P"), ("2K", "2K"), ("4K", "4K"), ("自定义", "自定义")]
+# 分辨率选择（2x2网格布局）
+    resolutions = [("1080P", "1080P"), ("2K", "2K"), ("4K", "4K"), ("当前", "current"), ("自定义", "自定义")]
 
     # 自定义分辨率输入框容器
     custom_frame = ttkb.Frame(resolution_card)
@@ -1010,53 +1019,119 @@ def create_gui():
             resolution_info_var.set("当前: 2560×1440")
         elif res == "4K":
             resolution_info_var.set("当前: 3840×2160")
+        elif res == "current":
+            # 显示当前系统分辨率
+            current_width, current_height = get_current_screen_resolution()
+            resolution_info_var.set(f"当前: {current_width}×{current_height}")
         else:
             resolution_info_var.set(f"当前: {custom_width_var.get()}×{custom_height_var.get()}")
 
     def on_resolution_change():
         """当分辨率选择改变时，更新自定义输入框状态"""
-        # 先隐藏所有动态元素
-        custom_frame.pack_forget()
-        info_label.pack_forget()
-
-        if resolution_var.get() == "自定义":
-            # 显示自定义输入框 - 居中显示
-            custom_frame.pack(anchor="center", pady=(5, 0))
-        else:
-            # 根据选择更新显示值
-            if resolution_var.get() == "1080P":
-                custom_width_var.set("1920")
-                custom_height_var.set("1080")
-            elif resolution_var.get() == "2K":
-                custom_width_var.set("2560")
-                custom_height_var.set("1440")
-            elif resolution_var.get() == "4K":
-                custom_width_var.set("3840")
-                custom_height_var.set("2160")
-
-        # 始终显示分辨率信息标签
-        info_label.pack(pady=(8, 0))
+        # 更新分辨率信息
         update_resolution_info()
+        
+        # 根据选择更新显示值
+        if resolution_var.get() == "current":
+            # 使用当前系统分辨率
+            current_width, current_height = get_current_screen_resolution()
+            custom_width_var.set(str(current_width))
+            custom_height_var.set(str(current_height))
+        elif resolution_var.get() == "1080P":
+            custom_width_var.set("1920")
+            custom_height_var.set("1080")
+        elif resolution_var.get() == "2K":
+            custom_width_var.set("2560")
+            custom_height_var.set("1440")
+        elif resolution_var.get() == "4K":
+            custom_width_var.set("3840")
+            custom_height_var.set("2160")
 
 
-    # 创建分辨率选择按钮（2x2网格布局）
+    # 创建分辨率选择按钮（3行2列布局）
     res_btn_frame.columnconfigure(0, weight=1)
     res_btn_frame.columnconfigure(1, weight=1)
-    for i, (text, value) in enumerate(resolutions):
-        rb = ttkb.Radiobutton(
-            res_btn_frame,
-            text=text,
-            variable=resolution_var,
-            value=value,
-            bootstyle="info-outline-toolbutton",
-            width=9,
-            command=on_resolution_change
-        )
-        rb.grid(row=i//2, column=i%2, padx=2, pady=2, sticky="ew")
+    
+    # 3行2列布局排列：
+    # 第1行: 1080P, 2K
+    # 第2行: 4K, 当前
+    # 第3行: 自定义, [自定义输入框]
+    
+    # 创建第1行按钮
+    rb_1080p = ttkb.Radiobutton(
+        res_btn_frame,
+        text="1080P",
+        variable=resolution_var,
+        value="1080P",
+        bootstyle="info-outline-toolbutton",
+        width=10,
+        command=on_resolution_change
+    )
+    rb_1080p.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+    
+    rb_2k = ttkb.Radiobutton(
+        res_btn_frame,
+        text="2K",
+        variable=resolution_var,
+        value="2K",
+        bootstyle="info-outline-toolbutton",
+        width=10,
+        command=on_resolution_change
+    )
+    rb_2k.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+    
+    # 创建第2行按钮
+    rb_4k = ttkb.Radiobutton(
+        res_btn_frame,
+        text="4K",
+        variable=resolution_var,
+        value="4K",
+        bootstyle="info-outline-toolbutton",
+        width=10,
+        command=on_resolution_change
+    )
+    rb_4k.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+    
+    rb_current = ttkb.Radiobutton(
+        res_btn_frame,
+        text="当前",
+        variable=resolution_var,
+        value="current",
+        bootstyle="info-outline-toolbutton",
+        width=10,
+        command=on_resolution_change
+    )
+    rb_current.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+    
+    # 创建第3行左侧的自定义按钮
+    rb_custom = ttkb.Radiobutton(
+        res_btn_frame,
+        text="自定义",
+        variable=resolution_var,
+        value="自定义",
+        bootstyle="info-outline-toolbutton",
+        width=10,
+        command=on_resolution_change
+    )
+    rb_custom.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
+    
+    # 创建第3行右侧的自定义输入框
+    custom_input_frame = ttkb.Frame(res_btn_frame)
+    custom_input_frame.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
+    
+    custom_width_label = ttkb.Label(custom_input_frame, text="宽:", width=2)
+    custom_width_label.pack(side=LEFT, padx=(0, 2))
 
-    # 初始化显示状态
-    if resolution_choice == "自定义":
-        custom_frame.pack(anchor="center", pady=(5, 0))
+    custom_width_entry = ttkb.Entry(custom_input_frame, textvariable=custom_width_var, width=5)
+    custom_width_entry.pack(side=LEFT, padx=(0, 8))
+
+    custom_height_label = ttkb.Label(custom_input_frame, text="高:", width=2)
+    custom_height_label.pack(side=LEFT, padx=(0, 2))
+
+    custom_height_entry = ttkb.Entry(custom_input_frame, textvariable=custom_height_var, width=5)
+    custom_height_entry.pack(side=LEFT)
+    
+    # 始终显示分辨率信息标签
     info_label.pack(pady=(8, 0))
 
     # ==================== 钓鱼记录开关卡片 ====================
@@ -1721,107 +1796,7 @@ def create_gui():
     btn_frame = ttkb.Frame(left_content_frame)
     btn_frame.pack(fill=X, pady=(8, 0))
 
-    def show_restart_dialog():
-        """显示需要重启软件的提示对话框"""
-        # 检查root窗口是否仍存在，避免程序退出时出错
-        if not root.winfo_exists():
-            return
-            
-        # 创建自定义对话框
-        try:
-            dialog = ttkb.Toplevel(root)  # 创建顶层窗口，不直接设置bootstyle
-            dialog.title("🎣 提示")  # 添加图标前缀
-            dialog.geometry("420x160")  # 调整尺寸，更宽松的布局
-            dialog.resizable(False, False)
-            dialog.grab_set()  # 模态对话框
-        except Exception as e:
-            # 捕获创建对话框可能出现的错误，特别是在程序退出时
-            print(f"⚠️ [提示] 无法显示重启对话框: {e}")
-            return
-        dialog.attributes('-alpha', 0.98)  # 添加轻微透明度
-        
-        # 添加对话框图标，处理打包后的资源路径
-        try:
-            import sys
-            import os
-            # 处理PyInstaller打包后的资源路径
-            if hasattr(sys, '_MEIPASS'):
-                # 打包后使用_internal目录
-                icon_path = os.path.join(sys._MEIPASS, "666.ico")
-            else:
-                # 开发环境使用当前目录
-                icon_path = "666.ico"
-            dialog.iconbitmap(icon_path)
-        except Exception as e:
-            pass  # 忽略图标加载错误
-        
-        # 计算中心位置
-        x = root.winfo_x() + (root.winfo_width() // 2) - (420 // 2)
-        y = root.winfo_y() + (root.winfo_height() // 2) - (160 // 2)
-        dialog.geometry(f"420x160+{x}+{y}")
-        
-        # 创建内容框架
-        content_frame = ttkb.Frame(dialog, padding=25)
-        content_frame.pack(fill=BOTH, expand=YES)
-        
-        # 提示文本，增强样式
-        message_label = ttkb.Label(
-            content_frame,
-            text="⚠️ 设置已保存，需要重启软件才能生效！",
-            font=('Segoe UI', 12, 'bold'),  # 增大字体并加粗
-            bootstyle="info",
-            justify="center",  # 居中对齐
-            wraplength=380  # 自动换行
-        )
-        message_label.pack(pady=(10, 25), fill=X)  # 调整边距，填充水平空间
-        
-        # 按钮框架
-        dialog_btn_frame = ttkb.Frame(content_frame)
-        dialog_btn_frame.pack(fill=X)
-        
-        def auto_restart():
-            """自动重启软件"""
-            dialog.destroy()
-            # 关闭当前应用
-            root.destroy()
-            # 重新启动应用
-            import sys
-            import os
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
-        
-        def got_it():
-            """我知道了，不重启"""
-            dialog.destroy()
-        
-        # 按钮框架布局优化
-        dialog_btn_frame.pack(fill=X, pady=(0, 10))
-        dialog_btn_frame.columnconfigure(0, weight=1)
-        dialog_btn_frame.columnconfigure(1, weight=1)
-        
-        # 自动重启按钮，增强样式
-        restart_btn = ttkb.Button(
-            dialog_btn_frame,
-            text="🔄 自动重启软件",
-            command=auto_restart,
-            bootstyle="success-outline",
-            width=18,
-            padding=5,
-            cursor="hand2"
-        )
-        restart_btn.grid(row=0, column=0, padx=(0, 15), sticky="ew")
-        
-        # 我知道了按钮，增强样式
-        got_it_btn = ttkb.Button(
-            dialog_btn_frame,
-            text="✅ 我知道了",
-            command=got_it,
-            bootstyle="info-outline",
-            width=18,
-            padding=5,
-            cursor="hand2"
-        )
-        got_it_btn.grid(row=0, column=1, padx=(15, 0), sticky="ew")
+
     
     def update_and_refresh():
         """更新参数并刷新显示"""
@@ -1837,8 +1812,6 @@ def create_gui():
         # 显示保存成功提示
         status_label.config(text="✅ 参数已保存", bootstyle="success")
         root.after(2000, lambda: status_label.config(text=f"按 {hotkey_name} 启动/暂停", bootstyle="light"))
-        # 显示需要重启的提示对话框
-        root.after(500, show_restart_dialog)
 
     update_button = ttkb.Button(
         btn_frame,
@@ -1994,11 +1967,12 @@ paogantime = 0.5
 BASE_WIDTH = 2560
 BASE_HEIGHT = 1440
 # 目标分辨率（修改为您的屏幕分辨率）
+# 初始默认值，后续会更新为当前系统分辨率
 TARGET_WIDTH = 2560
 TARGET_HEIGHT = 1440
 
 # 分辨率选择（用于GUI和保存）
-resolution_choice = "2K"
+resolution_choice = "current"
 
 # 计算缩放比例
 SCALE_X = TARGET_WIDTH / BASE_WIDTH
@@ -2504,6 +2478,34 @@ listener = None #监听
 hotkey_name = "F2"  # 默认热键显示名称
 hotkey_modifiers = set()  # 修饰键集合 (ctrl, alt, shift)
 hotkey_main_key = keyboard.Key.f2  # 主按键对象
+
+# 获取当前系统分辨率
+def get_current_screen_resolution():
+    """
+    获取当前系统的屏幕分辨率
+    返回: (width, height) 元组
+    """
+    try:
+        # 获取主显示器的分辨率
+        width = user32.GetSystemMetrics(0)  # SM_CXSCREEN = 0
+        height = user32.GetSystemMetrics(1)  # SM_CYSCREEN = 1
+        return width, height
+    except Exception as e:
+        print(f"❌ [错误] 获取屏幕分辨率失败: {e}")
+        return TARGET_WIDTH, TARGET_HEIGHT
+
+# 获取当前系统分辨率
+CURRENT_SCREEN_WIDTH, CURRENT_SCREEN_HEIGHT = get_current_screen_resolution()
+
+# 如果分辨率选择为"current"，则更新目标分辨率为当前系统分辨率
+if resolution_choice == "current":
+    TARGET_WIDTH = CURRENT_SCREEN_WIDTH
+    TARGET_HEIGHT = CURRENT_SCREEN_HEIGHT
+    # 重新计算缩放比例
+    SCALE_X = TARGET_WIDTH / BASE_WIDTH
+    SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
+    # 计算统一缩放比例
+    calculate_scale_factors()
 
 # 当前按下的修饰键状态
 current_modifiers = set()
@@ -3198,7 +3200,7 @@ if __name__ == "__main__":
     print("║     🎣  PartyFish 自动钓鱼助手  v2.4.2             ║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
-    print(f"║  📺 当前分辨率: {TARGET_WIDTH}×{TARGET_HEIGHT}".ljust(45)+"║")
+    print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
     print(f"║  ⌨️ 快捷键: {hotkey_name}启动/暂停脚本".ljust(42)+"║")
     print("║  🔧 开发者: FadedTUMI/PeiXiaoXiao                ║")
     print("╚" + "═" * 50 + "╝")
