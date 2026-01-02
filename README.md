@@ -1,4 +1,4 @@
-# 🎣 PartyFish - 猛兽派对自动钓鱼助手
+<img width="705" height="118" alt="image" src="https://github.com/user-attachments/assets/7109ae28-2c46-4bff-bc62-29272a9d548a" /># 🎣 PartyFish - 猛兽派对自动钓鱼助手
 
 <div align="center">
 
@@ -223,7 +223,13 @@ PartyFish/
 
 ### v2.8.1 (2025-12-31)
 - 在原有的功能上添加了时间抖动 其他不变
-- 后续再优化其他的 
+- 后续再优化其他的
+
+### v2.9(2026-01-03)
+- 修复了加时
+- 新添加4个配置文件（可改名）
+- 新添加当天钓鱼记录
+- 新添加选择分辨率自动保存
 
 ## 📝 许可证
 
