@@ -97,6 +97,57 @@ debug_auto_refresh = True  # 是否自动刷新调试信息
 # 参数文件路径
 # =========================
 PARAMETER_FILE = "./parameters.json"
+
+# =========================
+# 配置管理
+# =========================
+# 配置只管理5个核心钓鱼参数：t, leftclickdown, leftclickup, times, paogantime
+# 其他参数保持全局设置，不受配置切换影响
+
+# 配置数量限制
+MAX_CONFIGS = 4
+
+# 当前配置索引（0-3）
+current_config_index = 0
+
+# 配置名称
+config_names = ["配置1", "配置2", "配置3", "配置4"]
+
+# 配置参数，保存5个核心钓鱼参数
+config_params = [
+    # 配置1
+    {
+        "t": 0.3,
+        "leftclickdown": 2.5,
+        "leftclickup": 2,
+        "times": 15,
+        "paogantime": 0.5
+    },
+    # 配置2
+    {
+        "t": 0.3,
+        "leftclickdown": 2.0,
+        "leftclickup": 1.5,
+        "times": 20,
+        "paogantime": 0.5
+    },
+    # 配置3
+    {
+        "t": 0.4,
+        "leftclickdown": 3.0,
+        "leftclickup": 2.5,
+        "times": 10,
+        "paogantime": 0.5
+    },
+    # 配置4
+    {
+        "t": 0.2,
+        "leftclickdown": 1.5,
+        "leftclickup": 1.0,
+        "times": 25,
+        "paogantime": 0.5
+    }
+]
 # =========================
 # 初始化字体样式
 # =========================
@@ -324,6 +375,7 @@ def update_all_widget_fonts(widget, style, font_size_percent):
             
             # 计算新字体大小
             new_size = int(default_size * scale_factor)
+            new_size = max(5, min(30, new_size))
             
             # 构建新字体
             new_font = (base_font, new_size)
@@ -331,23 +383,11 @@ def update_all_widget_fonts(widget, style, font_size_percent):
             # 特殊处理标题和粗体文本
             try:
                 if widget_type == "Label" and ("PartyFish" in str(w.cget("text")) or "标题" in str(w.cget("text"))):
-                    title_size = int(14 * scale_factor)
-                    title_size = max(5, min(24, title_size))  # 限制标题最大24px
-                    new_font = (base_font, title_size, "bold")
+                    new_font = (base_font, int(14 * scale_factor), "bold")
                 elif widget_type == "Label" and "统计" in str(w.cget("text")):
-                    stat_size = int(10 * scale_factor)
-                    stat_size = max(5, min(18, stat_size))  # 限制统计标签最大18px
-                    new_font = (base_font, stat_size, "bold")
-                elif widget_type == "Label":
-                    # 对所有标签文本设置字体大小限制，确保150%字体下不会过大
-                    label_size = int(default_size * scale_factor)
-                    label_size = max(5, min(13, label_size))  # 限制普通标签最大13px
-                    new_font = (base_font, label_size)
+                    new_font = (base_font, int(10 * scale_factor), "bold")
             except:
                 pass
-            
-            # 对其他控件类型也设置合理的字体大小限制
-            new_size = max(5, min(14, new_size))
             
             # 尝试直接更新控件字体，如果失败则跳过
             try:
@@ -375,21 +415,33 @@ def update_all_widget_fonts(widget, style, font_size_percent):
 # 加载和保存参数
 # =========================
 def save_parameters():
-    params = {
+    """保存参数到文件"""
+    # 保存当前配置的核心参数
+    config_params[current_config_index] = {
         "t": t,
         "leftclickdown": leftclickdown,
         "leftclickup": leftclickup,
         "times": times,
-        "paogantime": paogantime,
-        "jiashi_var": jiashi_var,  # 保存加时参数
-        "resolution": resolution_choice,  # 保存分辨率选择
-        "custom_width": TARGET_WIDTH,  # 保存自定义宽度
-        "custom_height": TARGET_HEIGHT,  # 保存自定义高度
-        "hotkey": hotkey_name,  # 保存热键设置（如 "Ctrl+Shift+A" 或 "F2"）
-        "record_fish_enabled": record_fish_enabled,  # 保存钓鱼记录开关状态
-        "legendary_screenshot_enabled": legendary_screenshot_enabled,  # 保存传说/传奇鱼自动截屏开关状态
-        "font_size": font_size,  # 保存字体大小设置
+        "paogantime": paogantime
     }
+    
+    params = {
+        # 保存配置信息
+        "config_names": config_names,
+        "config_params": config_params,
+        "current_config_index": current_config_index,
+        
+        # 保存全局参数（不受配置切换影响）
+        "jiashi_var": jiashi_var,
+        "resolution": resolution_choice,
+        "custom_width": TARGET_WIDTH,
+        "custom_height": TARGET_HEIGHT,
+        "hotkey": hotkey_name,
+        "record_fish_enabled": record_fish_enabled,
+        "legendary_screenshot_enabled": legendary_screenshot_enabled,
+        "font_size": font_size
+    }
+    
     try:
         with open(PARAMETER_FILE, "w") as f:
             json.dump(params, f)
@@ -398,64 +450,121 @@ def save_parameters():
         print(f"❌ [错误] 保存参数失败: {e}")
 
 def load_parameters():
+    """从文件加载参数"""
     global t, leftclickdown, leftclickup, times, paogantime, jiashi_var
     global resolution_choice, TARGET_WIDTH, TARGET_HEIGHT, SCALE_X, SCALE_Y
     global hotkey_name, hotkey_modifiers, hotkey_main_key
-    global font_size
+    global font_size, record_fish_enabled, legendary_screenshot_enabled
+    global config_names, config_params, current_config_index
+    
     try:
-            with open(PARAMETER_FILE, "r") as f:
-                params = json.load(f)
-                t = params.get("t", t)
-                leftclickdown = params.get("leftclickdown", leftclickdown)
-                leftclickup = params.get("leftclickup", leftclickup)
-                times = params.get("times", times)
-                paogantime = params.get("paogantime", paogantime)
-                jiashi_var = params.get("jiashi_var", jiashi_var)
-                resolution_choice = params.get("resolution", "2K")
-                # 加载钓鱼记录开关状态
-                global record_fish_enabled
-                record_fish_enabled = params.get("record_fish_enabled", True)
-                # 加载传说/传奇鱼自动截屏开关状态
-                global legendary_screenshot_enabled
-                legendary_screenshot_enabled = params.get("legendary_screenshot_enabled", True)
-                # 加载字体大小设置
-                font_size = params.get("font_size", 100)  # 默认100%
-                # 加载热键设置（新格式支持组合键）
-                saved_hotkey = params.get("hotkey", "F2")
-                try:
-                    modifiers, main_key, main_key_name = parse_hotkey_string(saved_hotkey)
-                    if main_key is not None:
-                        hotkey_name = saved_hotkey
-                        hotkey_modifiers = modifiers
-                        hotkey_main_key = main_key
-                except Exception:
-                    # 解析失败，使用默认值
-                    hotkey_name = "F2"
-                    hotkey_modifiers = set()
-                    hotkey_main_key = keyboard.Key.f2
-            # 根据分辨率选择设置目标分辨率
-            if resolution_choice == "1080P":
-                TARGET_WIDTH, TARGET_HEIGHT = 1920, 1080
-            elif resolution_choice == "2K":
-                TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
-            elif resolution_choice == "4K":
-                TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
-            elif resolution_choice == "current":
-                # 使用当前系统分辨率
-                TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
-            elif resolution_choice == "自定义":
-                TARGET_WIDTH = params.get("custom_width", 2560)
-                TARGET_HEIGHT = params.get("custom_height", 1440)
-            # 重新计算缩放比例
-            SCALE_X = TARGET_WIDTH / BASE_WIDTH
-            SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
-            calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
-            update_region_coords()  # 更新区域坐标
-            #print(f"已加载参数: 循环间隔 = {t}, 收线时间 = {leftclickdown}, 放线时间 = {leftclickup}, 最大拉杆次数 = {times}，抛竿时间 = {paogantime}, 加时 = {jiashi_var}")
+        with open(PARAMETER_FILE, "r") as f:
+            params = json.load(f)
+            
+            # 加载配置信息
+            if "config_names" in params:
+                config_names = params["config_names"]
+            if "config_params" in params:
+                config_params = params["config_params"]
+            if "current_config_index" in params:
+                current_config_index = params["current_config_index"]
+            
+            # 加载当前配置的核心参数
+            current_config = config_params[current_config_index]
+            t = current_config["t"]
+            leftclickdown = current_config["leftclickdown"]
+            leftclickup = current_config["leftclickup"]
+            times = current_config["times"]
+            paogantime = current_config["paogantime"]
+            
+            # 加载全局参数
+            jiashi_var = params.get("jiashi_var", jiashi_var)
+            resolution_choice = params.get("resolution", "2K")
+            # 加载钓鱼记录开关状态
+            record_fish_enabled = params.get("record_fish_enabled", True)
+            # 加载传说/传奇鱼自动截屏开关状态
+            legendary_screenshot_enabled = params.get("legendary_screenshot_enabled", True)
+            # 加载字体大小设置
+            font_size = params.get("font_size", 100)  # 默认100%
+            # 加载热键设置（新格式支持组合键）
+            saved_hotkey = params.get("hotkey", "F2")
+            try:
+                modifiers, main_key, main_key_name = parse_hotkey_string(saved_hotkey)
+                if main_key is not None:
+                    hotkey_name = saved_hotkey
+                    hotkey_modifiers = modifiers
+                    hotkey_main_key = main_key
+            except Exception:
+                # 解析失败，使用默认值
+                hotkey_name = "F2"
+                hotkey_modifiers = set()
+                hotkey_main_key = keyboard.Key.f2
+        
+        # 根据分辨率选择设置目标分辨率
+        if resolution_choice == "1080P":
+            TARGET_WIDTH, TARGET_HEIGHT = 1920, 1080
+        elif resolution_choice == "2K":
+            TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
+        elif resolution_choice == "4K":
+            TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
+        elif resolution_choice == "current":
+            # 使用当前系统分辨率
+            TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
+        elif resolution_choice == "自定义":
+            TARGET_WIDTH = params.get("custom_width", 2560)
+            TARGET_HEIGHT = params.get("custom_height", 1440)
     except FileNotFoundError:
         print("📄 [信息] 未找到参数文件，使用默认值")
     except Exception as e:
         print(f"❌ [错误] 加载参数失败: {e}")
+    
+    # 重新计算缩放比例
+    SCALE_X = TARGET_WIDTH / BASE_WIDTH
+    SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
+    calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
+    update_region_coords()  # 更新区域坐标
+
+def switch_config(index):
+    """切换配置，只更新5个核心钓鱼参数"""
+    global current_config_index, t, leftclickdown, leftclickup, times, paogantime
+    
+    if index < 0 or index >= MAX_CONFIGS:
+        return False
+    
+    # 保存当前配置的参数
+    config_params[current_config_index] = {
+        "t": t,
+        "leftclickdown": leftclickdown,
+        "leftclickup": leftclickup,
+        "times": times,
+        "paogantime": paogantime
+    }
+    
+    # 切换到新配置
+    current_config_index = index
+    
+    # 加载新配置的参数
+    new_config = config_params[current_config_index]
+    t = new_config["t"]
+    leftclickdown = new_config["leftclickdown"]
+    leftclickup = new_config["leftclickup"]
+    times = new_config["times"]
+    paogantime = new_config["paogantime"]
+    
+    # 保存参数
+    save_parameters()
+    
+    return True
+
+def rename_config(index, new_name):
+    """重命名配置"""
+    global config_names
+    if index < 0 or index >= MAX_CONFIGS:
+        return False
+    
+    config_names[index] = new_name
+    save_parameters()
+    return True
 
 # =========================
 # 更新参数
@@ -1012,8 +1121,8 @@ def create_gui():
     main_frame.pack(fill=BOTH, expand=YES)
 
     # 配置主框架的行列权重
-    main_frame.columnconfigure(0, weight=0, minsize=240)  # 左侧面板权重调整为0，使用固定宽度
-    main_frame.columnconfigure(1, weight=2, minsize=400)  # 右侧面板权重保持2，更好地自适应扩展
+    main_frame.columnconfigure(0, weight=0, minsize=280)  # 左侧面板最小宽度调整，确保设置项完整显示
+    main_frame.columnconfigure(1, weight=2, minsize=400)  # 右侧面板权重增加，更好地自适应扩展
     main_frame.rowconfigure(0, weight=1)  # 内容区域自适应高度
 
     # ==================== 左侧面板（设置区域） ====================
@@ -1025,7 +1134,7 @@ def create_gui():
     left_scrollbar = ttkb.Scrollbar(
         left_panel,
         orient="vertical",
-        bootstyle="primary"
+        bootstyle="info"
     )
     left_scrollbar.pack(side=RIGHT, fill=Y)
     
@@ -1134,22 +1243,173 @@ def create_gui():
     # 绑定内容框架的Configure事件，更新滚动区域
     left_content_frame.bind("<Configure>", update_scroll_region)
 
+    # ==================== 配置管理 ====================
+    config_frame = ttkb.Frame(left_content_frame)
+    config_frame.pack(fill=X, pady=(0, 4))
+    
+    # 配置按钮列表
+    config_buttons = []
+    # 配置输入框列表（用于重命名）
+    config_entries = []
+    
+    # 当前配置索引变量（用于闭包）
+    config_index_var = [0]
+    
+    # 配置网格布局，4列均匀分布
+    for i in range(MAX_CONFIGS):
+        config_frame.columnconfigure(i, weight=1, uniform="config")
+    config_frame.rowconfigure(0, weight=1)
+    
+    def update_config_buttons():
+        """更新配置按钮的样式，高亮当前配置"""
+        for i, btn in enumerate(config_buttons):
+            if i == current_config_index:
+                btn.configure(bootstyle="success")  # 当前配置使用填充样式
+            else:
+                btn.configure(bootstyle="success-outline")  # 其他配置使用轮廓样式
+    
+    def on_config_click(index):
+        """配置按钮点击事件"""
+        # 保存当前参数到变量
+        t_var.set(str(t))
+        leftclickdown_var.set(str(leftclickdown))
+        leftclickup_var.set(str(leftclickup))
+        times_var.set(str(times))
+        paogantime_var.set(str(paogantime))
+        
+        # 切换配置
+        if switch_config(index):
+            # 更新输入框显示
+            t_var.set(str(t))
+            leftclickdown_var.set(str(leftclickdown))
+            leftclickup_var.set(str(leftclickup))
+            times_var.set(str(times))
+            paogantime_var.set(str(paogantime))
+            
+            # 更新按钮样式
+            update_config_buttons()
+    
+    def on_rename_config(index):
+        """开始重命名配置"""
+        # 确保所有其他输入框都已关闭
+        for idx in range(MAX_CONFIGS):
+            if idx != index and config_entries[idx].winfo_ismapped():
+                config_entries[idx].grid_remove()
+                config_buttons[idx].grid()
+        
+        # 隐藏按钮，显示输入框
+        config_buttons[index].grid_remove()
+        
+        # 设置输入框的值并显示
+        config_entries[index].delete(0, tk.END)
+        config_entries[index].insert(0, config_names[index])
+        config_entries[index].grid(row=0, column=index, padx=2, sticky="ew")
+        
+        # 自动选中所有文本并获得焦点
+        config_entries[index].select_range(0, tk.END)
+        config_entries[index].focus_set()
+    
+    def save_config_name(index, event=None):
+        """保存配置名称"""
+        # 确保是当前编辑的输入框
+        if not config_entries[index].winfo_ismapped():
+            return
+        
+        new_name = config_entries[index].get().strip()
+        if new_name and new_name != config_names[index]:
+            rename_config(index, new_name)
+            config_buttons[index].configure(text=new_name)
+        
+        # 隐藏输入框，显示按钮
+        config_entries[index].grid_remove()
+        config_buttons[index].grid(row=0, column=index, padx=2, sticky="ew")
+    
+    def cancel_rename(index, event=None):
+        """取消重命名配置"""
+        # 确保是当前编辑的输入框
+        if not config_entries[index].winfo_ismapped():
+            return
+        
+        # 隐藏输入框，显示按钮
+        config_entries[index].grid_remove()
+        config_buttons[index].grid(row=0, column=index, padx=2, sticky="ew")
+    
+    # 创建4个配置按钮和对应的输入框
+    for i in range(MAX_CONFIGS):
+        # 使用默认参数保存当前索引值，避免闭包问题
+        current_idx = i
+        
+        # 创建按钮
+        btn = ttkb.Button(
+            config_frame,
+            text=config_names[i],
+            bootstyle="success-outline",
+            width=0,  # 宽度0，让按钮自动扩展
+            command=lambda idx=current_idx: on_config_click(idx)
+        )
+        # 使用grid布局，固定列位置，水平扩展
+        btn.grid(row=0, column=i, padx=2, sticky="ew")
+        config_buttons.append(btn)
+        
+        # 创建对应的输入框（初始隐藏）
+        entry = ttkb.Entry(
+            config_frame,
+            width=0,  # 宽度0，让输入框自动扩展
+            justify=tk.CENTER
+        )
+        
+        # 绑定回车保存
+        def on_entry_return(idx):
+            def handler(event):
+                save_config_name(idx, event)
+            return handler
+        entry.bind("<Return>", on_entry_return(current_idx))
+        
+        # 绑定ESC取消
+        def on_entry_escape(idx):
+            def handler(event):
+                cancel_rename(idx, event)
+            return handler
+        entry.bind("<Escape>", on_entry_escape(current_idx))
+        
+        # 绑定失去焦点保存
+        def on_entry_focusout(idx):
+            def handler(event):
+                save_config_name(idx, event)
+            return handler
+        entry.bind("<FocusOut>", on_entry_focusout(current_idx))
+        
+        # 初始隐藏输入框
+        entry.grid(row=0, column=i, padx=2, sticky="ew")
+        entry.grid_remove()
+        config_entries.append(entry)
+        
+        # 绑定右击事件用于重命名
+        def on_button_right_click(idx):
+            def handler(event):
+                on_rename_config(idx)
+            return handler
+        btn.bind("<Button-3>", on_button_right_click(current_idx))
+    
+    # 初始更新按钮样式
+    update_config_buttons()
+    
     # ==================== 钓鱼参数卡片 ====================
     params_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⚙️ 钓鱼参数 ",
-        padding=10,
-        bootstyle="primary"
+        padding=8,
+        bootstyle="info"
     )
-    params_card.pack(fill=X, pady=(0, 6), padx=2)
+    params_card.pack(fill=X, pady=(0, 4))
 
     # 参数输入样式
     def create_param_row(parent, label_text, var, row, tooltip=""):
-        label = ttkb.Label(parent, text=label_text, bootstyle="light")
-        label.grid(row=row, column=0, sticky=W, pady=4, padx=(0, 10))
+        label = ttkb.Label(parent, text=label_text)
+        label.grid(row=row, column=0, sticky=W, pady=3, padx=(0, 8))
 
-        entry = ttkb.Entry(parent, textvariable=var, width=8, bootstyle="info")
-        entry.grid(row=row, column=1, sticky=E, pady=4)
+        entry = ttkb.Entry(parent, textvariable=var, width=10)
+        entry.grid(row=row, column=1, sticky=E, pady=3)
         
         # 保存输入框引用到全局列表
         input_entries.append(entry)
@@ -1184,10 +1444,10 @@ def create_gui():
     jiashi_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⏱️ 加时选项 ",
-        padding=10,
+        padding=8,
         bootstyle="warning"
     )
-    jiashi_card.pack(fill=X, pady=(0, 6), padx=2)
+    jiashi_card.pack(fill=X, pady=(0, 4))
 
     jiashi_var_option = ttkb.IntVar(value=jiashi_var)
 
@@ -1222,10 +1482,10 @@ def create_gui():
     hotkey_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⌨️ 热键设置 ",
-        padding=10,
+        padding=8,
         bootstyle="secondary"
     )
-    hotkey_card.pack(fill=X, pady=(0, 6), padx=2)
+    hotkey_card.pack(fill=X, pady=(0, 4))
 
     # 热键显示变量
     hotkey_var = ttkb.StringVar(value=hotkey_name)
@@ -1247,8 +1507,8 @@ def create_gui():
     hotkey_btn = ttkb.Button(
         hotkey_frame,
         text=hotkey_name,
-        bootstyle="primary-outline",
-        width=12
+        bootstyle="info-outline",
+        width=14
     )
     hotkey_btn.pack(side=RIGHT)
 
@@ -1403,10 +1663,10 @@ def create_gui():
     resolution_card = ttkb.Labelframe(
         left_content_frame,
         text=" 🖥️ 分辨率设置 ",
-        padding=10,
+        padding=8,
         bootstyle="success"
     )
-    resolution_card.pack(fill=X, pady=(0, 6), padx=2)
+    resolution_card.pack(fill=X, pady=(0, 4))
 
     resolution_var = ttkb.StringVar(value=resolution_choice)
     custom_width_var = ttkb.StringVar(value=str(TARGET_WIDTH))
@@ -1493,8 +1753,8 @@ def create_gui():
         text="1080P",
         variable=resolution_var,
         value="1080P",
-        bootstyle="primary-outline-toolbutton",
-        width=8,
+        bootstyle="info-outline-toolbutton",
+        width=10,
         command=on_resolution_change
     )
     rb_1080p.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
@@ -1504,8 +1764,8 @@ def create_gui():
         text="2K",
         variable=resolution_var,
         value="2K",
-        bootstyle="primary-outline-toolbutton",
-        width=8,
+        bootstyle="info-outline-toolbutton",
+        width=10,
         command=on_resolution_change
     )
     rb_2k.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
@@ -1516,8 +1776,8 @@ def create_gui():
         text="4K",
         variable=resolution_var,
         value="4K",
-        bootstyle="primary-outline-toolbutton",
-        width=8,
+        bootstyle="info-outline-toolbutton",
+        width=10,
         command=on_resolution_change
     )
     rb_4k.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
@@ -1527,8 +1787,8 @@ def create_gui():
         text="当前",
         variable=resolution_var,
         value="current",
-        bootstyle="primary-outline-toolbutton",
-        width=8,
+        bootstyle="info-outline-toolbutton",
+        width=10,
         command=on_resolution_change
     )
     rb_current.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
@@ -1539,8 +1799,8 @@ def create_gui():
         text="自定义",
         variable=resolution_var,
         value="自定义",
-        bootstyle="primary-outline-toolbutton",
-        width=8,
+        bootstyle="info-outline-toolbutton",
+        width=10,
         command=on_resolution_change
     )
     rb_custom.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
@@ -1568,10 +1828,10 @@ def create_gui():
     record_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 钓鱼记录设置 ",
-        padding=10,
+        padding=8,
         bootstyle="info"
     )
-    record_card.pack(fill=X, pady=(0, 6), padx=2)
+    record_card.pack(fill=X, pady=(0, 4))
 
     # 钓鱼记录开关
     record_fish_var = ttkb.IntVar(value=1 if record_fish_enabled else 0)
@@ -1637,10 +1897,10 @@ def create_gui():
     font_size_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 字体大小设置 ",
-        padding=10,
+        padding=8,
         bootstyle="info"
     )
-    font_size_card.pack(fill=X, pady=(0, 6), padx=2)
+    font_size_card.pack(fill=X, pady=(0, 4))
 
     # 字体大小变量
     font_size_var = ttkb.IntVar(value=font_size)
@@ -1738,9 +1998,9 @@ def create_gui():
         font_size_card,
         text="应用",
         command=lambda: update_font_size(),
-        bootstyle="primary"
+        bootstyle="success-outline"
     )
-    apply_font_btn.pack(fill=X, pady=(8, 0))
+    apply_font_btn.pack(fill=X, pady=(5, 0))
 
     # 定义字体大小更新函数
     def update_font_size():
@@ -1808,9 +2068,9 @@ def create_gui():
                 if font_size == 100:
                     new_font_size = 12
                 elif font_size == 150:
-                    new_font_size = 16
+                    new_font_size = 18
                 elif font_size == 200:
-                    new_font_size = 20  # 调整为20px，比原来的24px小，避免字体过大
+                    new_font_size = 24
                 
                 #print(f"字体大小设置: {font_size}%, 使用的字体大小: {new_font_size}px")
                 
@@ -1903,6 +2163,16 @@ def create_gui():
         command=lambda: update_fish_display()
     )
     current_btn.pack(side=LEFT, padx=5)
+
+    today_btn = ttkb.Radiobutton(
+        record_view_frame,
+        text="当天钓鱼",
+        variable=view_mode,
+        value="today",
+        bootstyle="info-outline-toolbutton",
+        command=lambda: update_fish_display()
+    )
+    today_btn.pack(side=LEFT, padx=5)
 
     all_btn = ttkb.Radiobutton(
         record_view_frame,
@@ -2106,15 +2376,43 @@ def create_gui():
         if keyword == "搜索鱼名...":
             keyword = ""
 
-        # 根据视图模式选择数据源
-        use_session = (view_mode.get() == "current")
+        # 获取视图模式
+        mode = view_mode.get()
         quality_filter = quality_var.get()
 
-        # 获取筛选后的记录
-        filtered = search_fish_records(keyword, quality_filter, use_session)
+        # 获取所有记录
+        all_records = []
         
-        # 获取所有记录用于统计（不考虑搜索和筛选）
-        all_records = current_session_fish if use_session else all_fish_records
+        # 根据视图模式选择数据源和筛选逻辑
+        if mode == "current":
+            # 本次钓鱼
+            all_records = current_session_fish
+            filtered = search_fish_records(keyword, quality_filter, True)
+        elif mode == "today":
+            # 当天钓鱼
+            # 获取今天的日期字符串
+            today = datetime.date.today().strftime("%Y-%m-%d")
+            # 从所有记录中筛选出今天的记录
+            all_records = [record for record in all_fish_records if record.timestamp.startswith(today)]
+            # 应用品质筛选和关键词搜索
+            filtered = []
+            for record in all_records:
+                # 品质筛选
+                if quality_filter != "全部":
+                    if quality_filter == "传说":
+                        if record.quality not in ["传说", "传奇"]:
+                            continue
+                    else:
+                        if record.quality != quality_filter:
+                            continue
+                # 关键词搜索
+                if keyword and keyword.lower() not in record.name.lower():
+                    continue
+                filtered.append(record)
+        else:  # all
+            # 历史总览
+            all_records = all_fish_records
+            filtered = search_fish_records(keyword, quality_filter, False)
         
         # 计算品质统计
         total = len(all_records)
@@ -2153,7 +2451,14 @@ def create_gui():
         rare_var.set(f"{quality_icons['稀有']} 稀有: {quality_counts['稀有']} ({calc_percentage(quality_counts['稀有']):.2f}%)")
         epic_var.set(f"{quality_icons['史诗']} 史诗: {quality_counts['史诗']} ({calc_percentage(quality_counts['史诗']):.2f}%)")
         legendary_var.set(f"{quality_icons['传说']} 传说: {total_legendary} ({calc_percentage(total_legendary):.2f}%)")
-        total_var.set(f"📊 总计: {total} 条")
+        
+        # 根据视图模式更新总计显示
+        if mode == "current":
+            total_var.set(f"📊 本次总计: {total} 条")
+        elif mode == "today":
+            total_var.set(f"📊 当天总计: {total} 条")
+        else:
+            total_var.set(f"📊 历史总计: {total} 条")
 
         # 显示记录（倒序，最新的在前面）
         for record in reversed(filtered[-100:]):  # 最多显示100条
@@ -2172,8 +2477,10 @@ def create_gui():
 
         # 更新统计
         total_display = len(filtered)
-        if use_session:
+        if mode == "current":
             stats_var.set(f"本次: {total_display} 条")
+        elif mode == "today":
+            stats_var.set(f"当天: {total_display} 条")
         else:
             stats_var.set(f"总计: {total_display} 条")
 
@@ -2278,7 +2585,7 @@ def create_gui():
 
     version_label = ttkb.Label(
         status_frame,
-        text="v2.7 | PartyFish",
+        text="v2.8.beta-3 | PartyFish",
         bootstyle="light"
     )
     version_label.pack(pady=(2, 0))
@@ -2422,6 +2729,7 @@ def calculate_scale_factors():
     """
     计算缩放比例，考虑不同宽高比的情况
     游戏UI通常基于16:9设计，非16:9分辨率需要特殊处理
+    支持1080P(16:9)、2K(16:9)、4K(16:9)以及16:10等非标准分辨率
     """
     global SCALE_X, SCALE_Y, SCALE_UNIFORM
 
@@ -2436,11 +2744,15 @@ def calculate_scale_factors():
 
     # 对于模板匹配和UI元素定位，使用基于宽高比的统一缩放
     # 16:10等非16:9分辨率需要特殊处理，确保UI元素正确定位
-    # 16:10的宽高比(1.6)比16:9(1.78)小，所以需要特殊处理
     # 游戏UI通常会保持水平居中，垂直方向调整位置
-    
+    # 16:10的宽高比(1.6)比16:9(1.78)小，需要特殊处理
     # 使用基于高度的缩放，确保垂直方向元素正确显示
+    # 这样可以确保UI元素在各种分辨率下都能保持正确的垂直位置
     SCALE_UNIFORM = SCALE_Y
+
+    # 对于16:10等特殊宽高比，记录调试信息
+    if abs(target_aspect - base_aspect) > 0.05:
+        print(f"📐 [调试] 宽高比变化: 目标 {target_aspect:.2f} (约{int(target_aspect*100)/100:.2f}:1)，基准 {base_aspect:.2f} (16:9)，统一缩放 {SCALE_UNIFORM:.2f}")
 
     return SCALE_X, SCALE_Y, SCALE_UNIFORM
 
@@ -3795,9 +4107,8 @@ def fangzhu_jiashi(scr):
         }
         add_debug_info(debug_info)
     
-    # 确保模板已加载
-    if jiashi is None:
-        load_jiashi()
+    # 每次都重新加载模板，确保适配当前分辨率
+    load_jiashi()
     x, y, w, h = JIASHI_REGION_BASE
     # 加时界面在屏幕中央，使用中心锚定方式
     scale = SCALE_UNIFORM
@@ -3956,8 +4267,8 @@ def start_hotkey_listener():
 # =========================
 # 主函数：定时识别并比较数字
 def handle_jiashi_thread():
-    global run_event, begin_event, previous_result, result_val_is
-    while not begin_event.is_set():
+    global run_event, previous_result, result_val_is
+    while True:
         if run_event.is_set():
             try:
                 # 为每个线程创建独立的mss对象
@@ -4013,7 +4324,7 @@ def main():
     jiashi_thread = threading.Thread(target=handle_jiashi_thread, daemon=True)
     jiashi_thread.start()
 
-    while not begin_event.is_set():
+    while True:
         if run_event.is_set():
             scr = None
             try:
@@ -4097,7 +4408,7 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v2.7             ║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v2.8.beta-3             ║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
