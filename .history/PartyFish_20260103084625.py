@@ -11,7 +11,6 @@ from pynput import keyboard, mouse  # 用于监听键盘和鼠标事件，支持
 import datetime
 import re
 import queue  # 用于线程安全通信
-import random  # 添加随机模块用于时间抖动
 
 # 过滤libpng的iCCP警告（图片ICC配置文件问题）
 warnings.filterwarnings("ignore", message=".*iCCP.*")
@@ -68,84 +67,6 @@ def add_debug_info(info):
 # 线程锁 - 保护共享变量
 # =========================
 param_lock = threading.Lock()  # 参数读写锁
-
-# =========================
-# 时间抖动配置
-# =========================
-JITTER_RANGE = 15  # 时间抖动范围 ±15%
-# 保存上次操作的时间戳
-last_operation_time = None
-last_operation_type = None
-
-def add_jitter(base_time):
-    """为给定的基础时间添加随机抖动
-    
-    Args:
-        base_time: 基础时间（秒）
-        
-    Returns:
-        float: 添加抖动后的时间（秒）
-    """
-    if base_time <= 0:
-        return base_time
-    
-    # 计算抖动范围（±JITTER_RANGE%）
-    jitter_factor = random.uniform(1 - JITTER_RANGE/100, 1 + JITTER_RANGE/100)
-    jittered_time = base_time * jitter_factor
-    
-    # 确保时间不为负数且保持精度
-    return max(0.01, round(jittered_time, 3))
-
-def print_timing_info(operation_type, base_time, actual_time, previous_interval=None):
-    """打印时间抖动信息
-    
-    Args:
-        operation_type: 操作类型字符串
-        base_time: 基础时间（秒）
-        actual_time: 实际执行时间（秒）
-        previous_interval: 与上次操作的时间间隔（秒）
-    """
-    global last_operation_time, last_operation_type
-    
-    current_time = time.time()
-    
-    # 计算与基础时间的偏差百分比
-    deviation = ((actual_time - base_time) / base_time) * 100 if base_time > 0 else 0
-    deviation_str = f"{deviation:+.1f}%"
-    
-    # 设置颜色标记（绿色为接近基础时间，红色为偏差较大）
-    if abs(deviation) <= 5:
-        deviation_display = f"\033[92m{deviation_str}\033[0m"  # 绿色
-    elif abs(deviation) <= 10:
-        deviation_display = f"\033[93m{deviation_str}\033[0m"  # 黄色
-    else:
-        deviation_display = f"\033[91m{deviation_str}\033[0m"  # 红色
-    
-    # 计算与上次操作的时间间隔
-    interval_info = ""
-    if last_operation_time is not None:
-        interval = current_time - last_operation_time
-        expected_interval = base_time if last_operation_type == operation_type else None
-        
-        if expected_interval is not None and expected_interval > 0:
-            interval_deviation = ((interval - expected_interval) / expected_interval) * 100
-            interval_str = f"{interval:.3f}s ({interval_deviation:+.1f}%)"
-            
-            if abs(interval_deviation) <= 10:
-                interval_color = "\033[92m"  # 绿色
-            elif abs(interval_deviation) <= 20:
-                interval_color = "\033[93m"  # 黄色
-            else:
-                interval_color = "\033[91m"  # 红色
-            
-            interval_info = f" | 间隔: {interval_color}{interval_str}\033[0m"
-    
-    # 更新最后操作信息
-    last_operation_time = current_time
-    last_operation_type = operation_type
-    
-    # 打印信息
-    print(f"⏱️  [时间] {operation_type}: 基础={base_time:.3f}s, 实际={actual_time:.3f}s ({deviation_display}){interval_info}")
 
 # =========================
 # 钓鱼记录开关
@@ -403,7 +324,6 @@ def update_all_widget_fonts(widget, style, font_size_percent):
             
             # 计算新字体大小
             new_size = int(default_size * scale_factor)
-            new_size = max(5, min(30, new_size))
             
             # 构建新字体
             new_font = (base_font, new_size)
@@ -411,11 +331,23 @@ def update_all_widget_fonts(widget, style, font_size_percent):
             # 特殊处理标题和粗体文本
             try:
                 if widget_type == "Label" and ("PartyFish" in str(w.cget("text")) or "标题" in str(w.cget("text"))):
-                    new_font = (base_font, int(14 * scale_factor), "bold")
+                    title_size = int(14 * scale_factor)
+                    title_size = max(5, min(24, title_size))  # 限制标题最大24px
+                    new_font = (base_font, title_size, "bold")
                 elif widget_type == "Label" and "统计" in str(w.cget("text")):
-                    new_font = (base_font, int(10 * scale_factor), "bold")
+                    stat_size = int(10 * scale_factor)
+                    stat_size = max(5, min(18, stat_size))  # 限制统计标签最大18px
+                    new_font = (base_font, stat_size, "bold")
+                elif widget_type == "Label":
+                    # 对所有标签文本设置字体大小限制，确保150%字体下不会过大
+                    label_size = int(default_size * scale_factor)
+                    label_size = max(5, min(13, label_size))  # 限制普通标签最大13px
+                    new_font = (base_font, label_size)
             except:
                 pass
+            
+            # 对其他控件类型也设置合理的字体大小限制
+            new_size = max(5, min(14, new_size))
             
             # 尝试直接更新控件字体，如果失败则跳过
             try:
@@ -457,7 +389,6 @@ def save_parameters():
         "record_fish_enabled": record_fish_enabled,  # 保存钓鱼记录开关状态
         "legendary_screenshot_enabled": legendary_screenshot_enabled,  # 保存传说/传奇鱼自动截屏开关状态
         "font_size": font_size,  # 保存字体大小设置
-        "jitter_range": JITTER_RANGE,  # 保存时间抖动范围
     }
     try:
         with open(PARAMETER_FILE, "w") as f:
@@ -470,59 +401,57 @@ def load_parameters():
     global t, leftclickdown, leftclickup, times, paogantime, jiashi_var
     global resolution_choice, TARGET_WIDTH, TARGET_HEIGHT, SCALE_X, SCALE_Y
     global hotkey_name, hotkey_modifiers, hotkey_main_key
-    global font_size, JITTER_RANGE
+    global font_size
     try:
-        with open(PARAMETER_FILE, "r") as f:
-            params = json.load(f)
-            t = params.get("t", t)
-            leftclickdown = params.get("leftclickdown", leftclickdown)
-            leftclickup = params.get("leftclickup", leftclickup)
-            times = params.get("times", times)
-            paogantime = params.get("paogantime", paogantime)
-            jiashi_var = params.get("jiashi_var", jiashi_var)
-            resolution_choice = params.get("resolution", "2K")
-            # 加载钓鱼记录开关状态
-            global record_fish_enabled
-            record_fish_enabled = params.get("record_fish_enabled", True)
-            # 加载传说/传奇鱼自动截屏开关状态
-            global legendary_screenshot_enabled
-            legendary_screenshot_enabled = params.get("legendary_screenshot_enabled", True)
-            # 加载字体大小设置
-            font_size = params.get("font_size", 100)  # 默认100%
-            # 加载时间抖动范围
-            JITTER_RANGE = params.get("jitter_range", 15)
-            # 加载热键设置（新格式支持组合键）
-            saved_hotkey = params.get("hotkey", "F2")
-            try:
-                modifiers, main_key, main_key_name = parse_hotkey_string(saved_hotkey)
-                if main_key is not None:
-                    hotkey_name = saved_hotkey
-                    hotkey_modifiers = modifiers
-                    hotkey_main_key = main_key
-            except Exception:
-                # 解析失败，使用默认值
-                hotkey_name = "F2"
-                hotkey_modifiers = set()
-                hotkey_main_key = keyboard.Key.f2
-        # 根据分辨率选择设置目标分辨率
-        if resolution_choice == "1080P":
-            TARGET_WIDTH, TARGET_HEIGHT = 1920, 1080
-        elif resolution_choice == "2K":
-            TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
-        elif resolution_choice == "4K":
-            TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
-        elif resolution_choice == "current":
-            # 使用当前系统分辨率
-            TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
-        elif resolution_choice == "自定义":
-            TARGET_WIDTH = params.get("custom_width", 2560)
-            TARGET_HEIGHT = params.get("custom_height", 1440)
-        # 重新计算缩放比例
-        SCALE_X = TARGET_WIDTH / BASE_WIDTH
-        SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
-        calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
-        update_region_coords()  # 更新区域坐标
-        #print(f"已加载参数: 循环间隔 = {t}, 收线时间 = {leftclickdown}, 放线时间 = {leftclickup}, 最大拉杆次数 = {times}，抛竿时间 = {paogantime}, 加时 = {jiashi_var}")
+            with open(PARAMETER_FILE, "r") as f:
+                params = json.load(f)
+                t = params.get("t", t)
+                leftclickdown = params.get("leftclickdown", leftclickdown)
+                leftclickup = params.get("leftclickup", leftclickup)
+                times = params.get("times", times)
+                paogantime = params.get("paogantime", paogantime)
+                jiashi_var = params.get("jiashi_var", jiashi_var)
+                resolution_choice = params.get("resolution", "2K")
+                # 加载钓鱼记录开关状态
+                global record_fish_enabled
+                record_fish_enabled = params.get("record_fish_enabled", True)
+                # 加载传说/传奇鱼自动截屏开关状态
+                global legendary_screenshot_enabled
+                legendary_screenshot_enabled = params.get("legendary_screenshot_enabled", True)
+                # 加载字体大小设置
+                font_size = params.get("font_size", 100)  # 默认100%
+                # 加载热键设置（新格式支持组合键）
+                saved_hotkey = params.get("hotkey", "F2")
+                try:
+                    modifiers, main_key, main_key_name = parse_hotkey_string(saved_hotkey)
+                    if main_key is not None:
+                        hotkey_name = saved_hotkey
+                        hotkey_modifiers = modifiers
+                        hotkey_main_key = main_key
+                except Exception:
+                    # 解析失败，使用默认值
+                    hotkey_name = "F2"
+                    hotkey_modifiers = set()
+                    hotkey_main_key = keyboard.Key.f2
+            # 根据分辨率选择设置目标分辨率
+            if resolution_choice == "1080P":
+                TARGET_WIDTH, TARGET_HEIGHT = 1920, 1080
+            elif resolution_choice == "2K":
+                TARGET_WIDTH, TARGET_HEIGHT = 2560, 1440
+            elif resolution_choice == "4K":
+                TARGET_WIDTH, TARGET_HEIGHT = 3840, 2160
+            elif resolution_choice == "current":
+                # 使用当前系统分辨率
+                TARGET_WIDTH, TARGET_HEIGHT = get_current_screen_resolution()
+            elif resolution_choice == "自定义":
+                TARGET_WIDTH = params.get("custom_width", 2560)
+                TARGET_HEIGHT = params.get("custom_height", 1440)
+            # 重新计算缩放比例
+            SCALE_X = TARGET_WIDTH / BASE_WIDTH
+            SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
+            calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
+            update_region_coords()  # 更新区域坐标
+            #print(f"已加载参数: 循环间隔 = {t}, 收线时间 = {leftclickdown}, 放线时间 = {leftclickup}, 最大拉杆次数 = {times}，抛竿时间 = {paogantime}, 加时 = {jiashi_var}")
     except FileNotFoundError:
         print("📄 [信息] 未找到参数文件，使用默认值")
     except Exception as e:
@@ -533,11 +462,11 @@ def load_parameters():
 # =========================
 def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paogantime_var, jiashi_var_option,
                       resolution_var, custom_width_var, custom_height_var, hotkey_var=None, record_fish_var=None,
-                      legendary_screenshot_var=None, jitter_var=None):
+                      legendary_screenshot_var=None):
     global t, leftclickdown, leftclickup, times, paogantime, jiashi_var
     global resolution_choice, TARGET_WIDTH, TARGET_HEIGHT, SCALE_X, SCALE_Y
     global hotkey_name, hotkey_modifiers, hotkey_main_key
-    global record_fish_enabled, legendary_screenshot_enabled, JITTER_RANGE
+    global record_fish_enabled, legendary_screenshot_enabled
 
     with param_lock:  # 使用锁保护参数更新
         try:
@@ -555,10 +484,6 @@ def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paog
             # 更新传说/传奇鱼自动截屏开关状态
             if legendary_screenshot_var is not None:
                 legendary_screenshot_enabled = bool(legendary_screenshot_var.get())
-            
-            # 更新时间抖动范围
-            if jitter_var is not None:
-                JITTER_RANGE = int(jitter_var.get())
 
             # 更新热键设置（新格式支持组合键）
             if hotkey_var is not None:
@@ -618,7 +543,6 @@ def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paog
             print(f"│  🖥️  分辨率: {resolution_choice} ({TARGET_WIDTH}×{TARGET_HEIGHT})")
             print(f"│  📐 缩放比例: X={SCALE_X:.2f}  Y={SCALE_Y:.2f}  统一={SCALE_UNIFORM:.2f}")
             print(f"│  ⌨️  热键: {hotkey_name}")
-            print(f"│  🎲 时间抖动: ±{JITTER_RANGE}%")
             print("└" + "─" * 48 + "┘")
             # 保存到文件
             save_parameters()
@@ -1088,8 +1012,8 @@ def create_gui():
     main_frame.pack(fill=BOTH, expand=YES)
 
     # 配置主框架的行列权重
-    main_frame.columnconfigure(0, weight=0, minsize=280)  # 左侧面板最小宽度调整，确保设置项完整显示
-    main_frame.columnconfigure(1, weight=2, minsize=400)  # 右侧面板权重增加，更好地自适应扩展
+    main_frame.columnconfigure(0, weight=0, minsize=240)  # 左侧面板权重调整为0，使用固定宽度
+    main_frame.columnconfigure(1, weight=2, minsize=400)  # 右侧面板权重保持2，更好地自适应扩展
     main_frame.rowconfigure(0, weight=1)  # 内容区域自适应高度
 
     # ==================== 左侧面板（设置区域） ====================
@@ -1101,7 +1025,7 @@ def create_gui():
     left_scrollbar = ttkb.Scrollbar(
         left_panel,
         orient="vertical",
-        bootstyle="info"
+        bootstyle="primary"
     )
     left_scrollbar.pack(side=RIGHT, fill=Y)
     
@@ -1214,18 +1138,18 @@ def create_gui():
     params_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⚙️ 钓鱼参数 ",
-        padding=8,
-        bootstyle="info"
+        padding=10,
+        bootstyle="primary"
     )
-    params_card.pack(fill=X, pady=(0, 4))
+    params_card.pack(fill=X, pady=(0, 6), padx=2)
 
     # 参数输入样式
     def create_param_row(parent, label_text, var, row, tooltip=""):
-        label = ttkb.Label(parent, text=label_text)
-        label.grid(row=row, column=0, sticky=W, pady=3, padx=(0, 8))
+        label = ttkb.Label(parent, text=label_text, bootstyle="light")
+        label.grid(row=row, column=0, sticky=W, pady=4, padx=(0, 10))
 
-        entry = ttkb.Entry(parent, textvariable=var, width=10)
-        entry.grid(row=row, column=1, sticky=E, pady=3)
+        entry = ttkb.Entry(parent, textvariable=var, width=8, bootstyle="info")
+        entry.grid(row=row, column=1, sticky=E, pady=4)
         
         # 保存输入框引用到全局列表
         input_entries.append(entry)
@@ -1260,10 +1184,10 @@ def create_gui():
     jiashi_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⏱️ 加时选项 ",
-        padding=8,
+        padding=10,
         bootstyle="warning"
     )
-    jiashi_card.pack(fill=X, pady=(0, 4))
+    jiashi_card.pack(fill=X, pady=(0, 6), padx=2)
 
     jiashi_var_option = ttkb.IntVar(value=jiashi_var)
 
@@ -1298,10 +1222,10 @@ def create_gui():
     hotkey_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⌨️ 热键设置 ",
-        padding=8,
+        padding=10,
         bootstyle="secondary"
     )
-    hotkey_card.pack(fill=X, pady=(0, 4))
+    hotkey_card.pack(fill=X, pady=(0, 6), padx=2)
 
     # 热键显示变量
     hotkey_var = ttkb.StringVar(value=hotkey_name)
@@ -1323,8 +1247,8 @@ def create_gui():
     hotkey_btn = ttkb.Button(
         hotkey_frame,
         text=hotkey_name,
-        bootstyle="info-outline",
-        width=14
+        bootstyle="primary-outline",
+        width=12
     )
     hotkey_btn.pack(side=RIGHT)
 
@@ -1479,10 +1403,10 @@ def create_gui():
     resolution_card = ttkb.Labelframe(
         left_content_frame,
         text=" 🖥️ 分辨率设置 ",
-        padding=8,
+        padding=10,
         bootstyle="success"
     )
-    resolution_card.pack(fill=X, pady=(0, 4))
+    resolution_card.pack(fill=X, pady=(0, 6), padx=2)
 
     resolution_var = ttkb.StringVar(value=resolution_choice)
     custom_width_var = ttkb.StringVar(value=str(TARGET_WIDTH))
@@ -1491,7 +1415,9 @@ def create_gui():
     # 分辨率选择按钮组（使用2x2网格布局）
     res_btn_frame = ttkb.Frame(resolution_card)
     res_btn_frame.pack(fill=X, pady=(0, 6))
-    
+# 分辨率选择（2x2网格布局）
+    resolutions = [("1080P", "1080P"), ("2K", "2K"), ("4K", "4K"), ("当前", "current"), ("自定义", "自定义")]
+
     # 自定义分辨率输入框容器
     custom_frame = ttkb.Frame(resolution_card)
 
@@ -1551,6 +1477,7 @@ def create_gui():
             custom_width_var.set("3840")
             custom_height_var.set("2160")
 
+
     # 创建分辨率选择按钮（3行2列布局）
     res_btn_frame.columnconfigure(0, weight=1)
     res_btn_frame.columnconfigure(1, weight=1)
@@ -1566,8 +1493,8 @@ def create_gui():
         text="1080P",
         variable=resolution_var,
         value="1080P",
-        bootstyle="info-outline-toolbutton",
-        width=10,
+        bootstyle="primary-outline-toolbutton",
+        width=8,
         command=on_resolution_change
     )
     rb_1080p.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
@@ -1577,8 +1504,8 @@ def create_gui():
         text="2K",
         variable=resolution_var,
         value="2K",
-        bootstyle="info-outline-toolbutton",
-        width=10,
+        bootstyle="primary-outline-toolbutton",
+        width=8,
         command=on_resolution_change
     )
     rb_2k.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
@@ -1589,8 +1516,8 @@ def create_gui():
         text="4K",
         variable=resolution_var,
         value="4K",
-        bootstyle="info-outline-toolbutton",
-        width=10,
+        bootstyle="primary-outline-toolbutton",
+        width=8,
         command=on_resolution_change
     )
     rb_4k.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
@@ -1600,8 +1527,8 @@ def create_gui():
         text="当前",
         variable=resolution_var,
         value="current",
-        bootstyle="info-outline-toolbutton",
-        width=10,
+        bootstyle="primary-outline-toolbutton",
+        width=8,
         command=on_resolution_change
     )
     rb_current.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
@@ -1612,8 +1539,8 @@ def create_gui():
         text="自定义",
         variable=resolution_var,
         value="自定义",
-        bootstyle="info-outline-toolbutton",
-        width=10,
+        bootstyle="primary-outline-toolbutton",
+        width=8,
         command=on_resolution_change
     )
     rb_custom.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
@@ -1637,61 +1564,14 @@ def create_gui():
     # 始终显示分辨率信息标签
     info_label.pack(pady=(8, 0))
 
-    # ==================== 时间抖动设置卡片 ====================
-    jitter_card = ttkb.Labelframe(
-        left_content_frame,
-        text=" ⏱️ 时间抖动设置 ",
-        padding=8,
-        bootstyle="warning"
-    )
-    jitter_card.pack(fill=X, pady=(0, 4))
-
-    # 时间抖动范围设置
-    jitter_var = ttkb.IntVar(value=JITTER_RANGE)
-    
-    jitter_frame = ttkb.Frame(jitter_card)
-    jitter_frame.pack(fill=X, pady=(5, 0))
-    
-    jitter_label = ttkb.Label(jitter_frame, text="时间抖动范围 (±%):")
-    jitter_label.pack(side=LEFT)
-    
-    jitter_scale = ttkb.Scale(
-        jitter_frame,
-        from_=0,
-        to=30,
-        orient="horizontal",
-        variable=jitter_var,
-        bootstyle="warning",
-        length=120
-    )
-    jitter_scale.pack(side=LEFT, padx=10)
-    
-    jitter_value_label = ttkb.Label(jitter_frame, text=f"{jitter_var.get()}%")
-    jitter_value_label.pack(side=LEFT)
-    
-    # 更新抖动值显示
-    def update_jitter_value(*args):
-        jitter_value_label.config(text=f"{jitter_var.get()}%")
-    
-    jitter_var.trace("w", update_jitter_value)
-    
-    # 时间抖动说明
-    jitter_info_label = ttkb.Label(
-        jitter_card,
-        text="在抛竿和收杆时间上添加随机波动，避免检测",
-        bootstyle="secondary",
-        font=("Segoe UI", 8)
-    )
-    jitter_info_label.pack(pady=(5, 0))
-
     # ==================== 钓鱼记录开关卡片 ====================
     record_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 钓鱼记录设置 ",
-        padding=8,
+        padding=10,
         bootstyle="info"
     )
-    record_card.pack(fill=X, pady=(0, 4))
+    record_card.pack(fill=X, pady=(0, 6), padx=2)
 
     # 钓鱼记录开关
     record_fish_var = ttkb.IntVar(value=1 if record_fish_enabled else 0)
@@ -1757,10 +1637,10 @@ def create_gui():
     font_size_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 字体大小设置 ",
-        padding=8,
+        padding=10,
         bootstyle="info"
     )
-    font_size_card.pack(fill=X, pady=(0, 4))
+    font_size_card.pack(fill=X, pady=(0, 6), padx=2)
 
     # 字体大小变量
     font_size_var = ttkb.IntVar(value=font_size)
@@ -1858,9 +1738,9 @@ def create_gui():
         font_size_card,
         text="应用",
         command=lambda: update_font_size(),
-        bootstyle="success-outline"
+        bootstyle="primary"
     )
-    apply_font_btn.pack(fill=X, pady=(5, 0))
+    apply_font_btn.pack(fill=X, pady=(8, 0))
 
     # 定义字体大小更新函数
     def update_font_size():
@@ -1928,9 +1808,9 @@ def create_gui():
                 if font_size == 100:
                     new_font_size = 12
                 elif font_size == 150:
-                    new_font_size = 18
+                    new_font_size = 16
                 elif font_size == 200:
-                    new_font_size = 24
+                    new_font_size = 20  # 调整为20px，比原来的24px小，避免字体过大
                 
                 #print(f"字体大小设置: {font_size}%, 使用的字体大小: {new_font_size}px")
                 
@@ -2341,17 +2221,20 @@ def create_gui():
     # 初始加载
     update_fish_display()
 
+
     # ==================== 操作按钮区域（左侧面板底部） ====================
     btn_frame = ttkb.Frame(left_content_frame)
     btn_frame.pack(fill=X, pady=(8, 0))
 
+
+    
     def update_and_refresh():
         """更新参数并刷新显示"""
         update_parameters(
             t_var, leftclickdown_var, leftclickup_var, times_var,
             paogantime_var, jiashi_var_option, resolution_var,
             custom_width_var, custom_height_var, hotkey_var, record_fish_var,
-            legendary_screenshot_var, jitter_var
+            legendary_screenshot_var
         )
         resolution_info_var.set(f"当前: {TARGET_WIDTH}×{TARGET_HEIGHT}")
         hotkey_info_label.config(text=f"按 {hotkey_name} 启动/暂停 | 点击按钮修改")
@@ -2418,7 +2301,7 @@ def create_gui():
     # 可点击的开发者链接
     dev_link = ttkb.Label(
         dev_frame,
-        text="FadedTUMI/PeiXiaoXiao/MaiDong",
+        text="FadedTUMI/PeiXiaoXiao",
         bootstyle="info",
         cursor="hand2"
     )
@@ -2508,62 +2391,7 @@ def create_gui():
     
     # 运行 GUI
     root.mainloop()
-
 # =========================
-# 带时间抖动的鼠标操作函数
-# =========================
-def pressandreleasemousebutton_with_jitter():
-    """带时间抖动的鼠标按下和释放操作"""
-    global leftclickdown, leftclickup
-    
-    with param_lock:
-        base_down_time = leftclickdown
-        base_up_time = leftclickup
-    
-    # 添加抖动
-    actual_down_time = add_jitter(base_down_time)
-    actual_up_time = add_jitter(base_up_time)
-    
-    # 执行操作
-    start_time = time.time()
-    user32.mouse_event(0x02, 0, 0, 0, 0)
-    time.sleep(actual_down_time)
-    user32.mouse_event(0x04, 0, 0, 0, 0)
-    time.sleep(actual_up_time)
-    end_time = time.time()
-    
-    # 打印时间信息
-    total_time = actual_down_time + actual_up_time
-    print_timing_info("收杆", base_down_time + base_up_time, total_time)
-    
-    return total_time
-
-def cast_rod_with_jitter(f_key_type="F1"):
-    """带时间抖动的抛竿操作
-    
-    Args:
-        f_key_type: "F1" 或 "F2" 表示按哪个键抛竿
-    """
-    global paogantime
-    
-    with param_lock:
-        base_time = paogantime
-    
-    # 添加抖动
-    actual_time = add_jitter(base_time)
-    
-    # 执行抛竿操作
-    start_time = time.time()
-    user32.mouse_event(0x02, 0, 0, 0, 0)
-    time.sleep(actual_time)
-    user32.mouse_event(0x04, 0, 0, 0, 0)
-    end_time = time.time()
-    
-    # 打印时间信息
-    print_timing_info("抛竿", base_time, actual_time)
-    
-    return actual_time
-
 # =========================
 # 常数 t 定义：定义时间间隔为 0.3 秒（可以根据需要调整）
 t = 0.3  # 将时间间隔缩短，提高响应速度
@@ -3353,11 +3181,8 @@ def search_fish_records(keyword="", quality_filter="全部", use_session=True):
             filtered.append(record)
 
         return filtered
-
-# =========================
 # 定义区域的坐标 (x, y, w, h) - 基于2K分辨率的基准值
 # 使用 scale_coords 函数自动缩放
-# =========================
 region3_coords = scale_coords(1172, 165, 34, 34)    #上鱼星星
 region4_coords = scale_coords(1100, 1329, 10, 19)   #F1位置
 region5_coords = scale_coords(1212, 1329, 10, 19)   #F2位置
@@ -3656,7 +3481,6 @@ def load_f2():
         scale = SCALE_UNIFORM
         f2 = scale_template(template, scale, scale)
     return f2
-
 def load_shangyule():
     global shangyule
     shangyule_path = os.path.join(template_folder_path, "shangyu_grayscale.png")
@@ -3665,7 +3489,6 @@ def load_shangyule():
     scale = SCALE_UNIFORM
     shangyule = scale_template(template, scale, scale)
     return shangyule
-
 def load_jiashi():
     global jiashi
     jiashi_path = os.path.join(template_folder_path, "chang_grayscale.png")
@@ -3674,13 +3497,11 @@ def load_jiashi():
     scale = SCALE_UNIFORM
     jiashi = scale_template(template, scale, scale)
     return jiashi
-
 # =========================
 # 鼠标操作（使用 win32api 实现）
 # =========================
 mouse_lock = threading.Lock()
 mouse_is_down = False
-
 def pressandreleasemousebutton():
     user32.mouse_event(0x02, 0, 0, 0, 0)
     time.sleep(leftclickdown)
@@ -3700,7 +3521,6 @@ def ensure_mouse_up():
         if mouse_is_down:
             user32.mouse_event(0x04, 0, 0, 0, 0)  # 左键释放
             mouse_is_down = False
-
 # =========================
 # 比较数字大小
 # =========================
@@ -3714,7 +3534,6 @@ def compare_results():
         return -1  # 上次结果较大
     else:
         return 0  # 当前结果与上次相同
-
 # =========================
 # 截取屏幕区域
 # =========================
@@ -3938,7 +3757,6 @@ def fished(scr):
         return None
     # 执行模板匹配并检查最大匹配度是否大于 0.8
     return cv2.minMaxLoc(cv2.matchTemplate(region_gray, star_template, cv2.TM_CCOEFF_NORMED))[1] > 0.8
-
 def f1_mached(scr):
     global region4_coords, f1
     # 确保模板已加载
@@ -3948,7 +3766,6 @@ def f1_mached(scr):
     if region_gray is None:
         return None
     return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f1, cv2.TM_CCOEFF_NORMED))[1] > 0.8
-
 def f2_mached(scr):
     global region5_coords, f2
     # 确保模板已加载
@@ -3958,7 +3775,6 @@ def f2_mached(scr):
     if region_gray is None:
         return None
     return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f2, cv2.TM_CCOEFF_NORMED))[1] > 0.8
-
 def shangyu_mached(scr):
     global region6_coords, shangyule
     # 确保模板已加载
@@ -3968,7 +3784,6 @@ def shangyu_mached(scr):
     if region_gray is None:
         return None
     return cv2.minMaxLoc(cv2.matchTemplate(region_gray, shangyule, cv2.TM_CCOEFF_NORMED))[1] > 0.8
-
 def fangzhu_jiashi(scr):
     global jiashi
     # 记录日志：开始加时识别
@@ -4036,7 +3851,6 @@ def fangzhu_jiashi(scr):
         add_debug_info(debug_info)
     
     return result
-
 # =========================
 # 程序主循环与热键监听
 # =========================
@@ -4137,10 +3951,10 @@ def start_hotkey_listener():
         mouse_listener = mouse.Listener(on_click=on_mouse_press)
         mouse_listener.daemon = True
         mouse_listener.start()
-
 # =========================
 # 主函数
 # =========================
+# 主函数：定时识别并比较数字
 def handle_jiashi_thread():
     global run_event, begin_event, previous_result, result_val_is
     while not begin_event.is_set():
@@ -4160,7 +3974,6 @@ def handle_jiashi_thread():
                             btn_x, btn_y = scale_point_center_anchored(*BTN_NO_JIASHI_BASE)
                             user32.SetCursorPos(btn_x, btn_y)
                             time.sleep(0.05)
-                            # 加时按钮点击（短暂点击，不添加抖动）
                             user32.mouse_event(0x02, 0, 0, 0, 0)
                             time.sleep(0.1)
                             user32.mouse_event(0x04, 0, 0, 0, 0)
@@ -4173,7 +3986,6 @@ def handle_jiashi_thread():
                             btn_x, btn_y = scale_point_center_anchored(*BTN_YES_JIASHI_BASE)
                             user32.SetCursorPos(btn_x, btn_y)
                             time.sleep(0.05)
-                            # 加时按钮点击（短暂点击，不添加抖动）
                             user32.mouse_event(0x02, 0, 0, 0, 0)
                             time.sleep(0.1)
                             user32.mouse_event(0x04, 0, 0, 0, 0)
@@ -4207,15 +4019,18 @@ def main():
             try:
                 scr = mss.mss()
 
-                # 检测F1/F2抛竿（使用带抖动的抛竿函数）
+                # 检测F1/F2抛竿
                 if f1_mached(scr):
-                    cast_rod_with_jitter("F1")
-                    time.sleep(0.15)  # 固定延迟
+                    user32.mouse_event(0x02, 0, 0, 0, 0)
+                    time.sleep(paogantime)
+                    user32.mouse_event(0x04, 0, 0, 0, 0)
+                    time.sleep(0.15)
                 elif f2_mached(scr):
-                    cast_rod_with_jitter("F2")
-                    time.sleep(0.15)  # 固定延迟
+                    user32.mouse_event(0x02, 0, 0, 0, 0)
+                    time.sleep(paogantime)
+                    user32.mouse_event(0x04, 0, 0, 0, 0)
+                    time.sleep(0.15)
                 elif shangyu_mached(scr):
-                    # 上鱼右键操作（短暂点击，不添加抖动）
                     user32.mouse_event(0x02, 0, 0, 0, 0)
                     time.sleep(0.1)
                     user32.mouse_event(0x04, 0, 0, 0, 0)
@@ -4243,8 +4058,7 @@ def main():
                             current_times = times
                         if a <= current_times:
                             a += 1
-                            # 使用带抖动的收杆函数
-                            pressandreleasemousebutton_with_jitter()
+                            pressandreleasemousebutton()  # 执行点击循环直到识别到 star.png
                         else:
                             a = 0
                             print("🎣 [提示] 达到最大拉杆次数，本轮结束")
@@ -4283,12 +4097,11 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v2.8             ║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v2.7             ║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
     print(f"║  ⌨️ 快捷键: {hotkey_name}启动/暂停脚本".ljust(42)+"║")
-    print(f"║  🎲 时间抖动: ±{JITTER_RANGE}%".ljust(42)+"║")
     print("║  🔧 开发者: FadedTUMI/PeiXiaoXiao                ║")
     print("╚" + "═" * 50 + "╝")
     print()
