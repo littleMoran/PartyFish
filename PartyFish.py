@@ -5,12 +5,13 @@ import warnings
 import cv2
 import numpy as np
 from PIL import Image
-import threading  # For running the script in a separate thread
+import threading  # 用于在独立线程中运行脚本
 import ctypes
 from pynput import keyboard, mouse  # 用于监听键盘和鼠标事件，支持热键和鼠标侧键操作 
 import datetime
 import re
 import queue  # 用于线程安全通信
+import random  # 添加随机模块用于时间抖动
 
 # 过滤libpng的iCCP警告（图片ICC配置文件问题）
 warnings.filterwarnings("ignore", message=".*iCCP.*")
@@ -94,6 +95,86 @@ debug_window = None  # 调试窗口引用
 debug_auto_refresh = True  # 是否自动刷新调试信息
 
 # =========================
+# 时间抖动配置
+# =========================
+JITTER_RANGE = 15  # 时间抖动范围 ±15%
+# 保存上次操作的时间戳
+last_operation_time = None
+last_operation_type = None
+
+
+def add_jitter(base_time):
+    """为给定的基础时间添加随机抖动
+    
+    Args:
+        base_time: 基础时间（秒）
+        
+    Returns:
+        float: 添加抖动后的时间（秒）
+    """
+    if base_time <= 0:
+        return base_time
+    
+    # 计算抖动范围（±JITTER_RANGE%）
+    jitter_factor = random.uniform(1 - JITTER_RANGE/100, 1 + JITTER_RANGE/100)
+    jittered_time = base_time * jitter_factor
+    
+    # 确保时间不为负数且保持精度
+    return max(0.01, round(jittered_time, 3))
+
+
+def print_timing_info(operation_type, base_time, actual_time, previous_interval=None):
+    """打印时间抖动信息
+    
+    Args:
+        operation_type: 操作类型字符串
+        base_time: 基础时间（秒）
+        actual_time: 实际执行时间（秒）
+        previous_interval: 与上次操作的时间间隔（秒）
+    """
+    global last_operation_time, last_operation_type
+    
+    current_time = time.time()
+    
+    # 计算与基础时间的偏差百分比
+    deviation = ((actual_time - base_time) / base_time) * 100 if base_time > 0 else 0
+    deviation_str = f"{deviation:+.1f}%"
+    
+    # 设置颜色标记（绿色为接近基础时间，红色为偏差较大）
+    if abs(deviation) <= 5:
+        deviation_display = f"\033[92m{deviation_str}\033[0m"  # 绿色
+    elif abs(deviation) <= 10:
+        deviation_display = f"\033[93m{deviation_str}\033[0m"  # 黄色
+    else:
+        deviation_display = f"\033[91m{deviation_str}\033[0m"  # 红色
+    
+    # 计算与上次操作的时间间隔
+    interval_info = ""
+    if last_operation_time is not None:
+        interval = current_time - last_operation_time
+        expected_interval = base_time if last_operation_type == operation_type else None
+        
+        if expected_interval is not None and expected_interval > 0:
+            interval_deviation = ((interval - expected_interval) / expected_interval) * 100
+            interval_str = f"{interval:.3f}s ({interval_deviation:+.1f}%)"
+            
+            if abs(interval_deviation) <= 10:
+                interval_color = "\033[92m"  # 绿色
+            elif abs(interval_deviation) <= 20:
+                interval_color = "\033[93m"  # 黄色
+            else:
+                interval_color = "\033[91m"  # 红色
+            
+            interval_info = f" | 间隔: {interval_color}{interval_str}\033[0m"
+    
+    # 更新最后操作信息
+    last_operation_time = current_time
+    last_operation_type = operation_type
+    
+    # 打印信息
+    print(f"⏱️  [时间] {operation_type}: 基础={base_time:.3f}s, 实际={actual_time:.3f}s ({deviation_display}){interval_info}")
+
+# =========================
 # 参数文件路径
 # =========================
 PARAMETER_FILE = "./parameters.json"
@@ -133,11 +214,11 @@ config_params = [
     },
     # 配置3
     {
-        "t": 0.4,
-        "leftclickdown": 3.0,
-        "leftclickup": 2.5,
-        "times": 10,
-        "paogantime": 0.5
+        "t": 0.2,
+        "leftclickdown": 0.4,
+        "leftclickup": 0.2,
+        "times": 50,
+        "paogantime": 0.1
     },
     # 配置4
     {
@@ -439,11 +520,12 @@ def save_parameters():
         "hotkey": hotkey_name,
         "record_fish_enabled": record_fish_enabled,
         "legendary_screenshot_enabled": legendary_screenshot_enabled,
-        "font_size": font_size
+        "font_size": font_size,
+        "jitter_range": JITTER_RANGE
     }
     
     try:
-        with open(PARAMETER_FILE, "w") as f:
+        with open(PARAMETER_FILE, "w", encoding="utf-8") as f:
             json.dump(params, f)
         print("💾 [保存] 参数已成功保存到文件")
     except Exception as e:
@@ -456,9 +538,10 @@ def load_parameters():
     global hotkey_name, hotkey_modifiers, hotkey_main_key
     global font_size, record_fish_enabled, legendary_screenshot_enabled
     global config_names, config_params, current_config_index
+    global JITTER_RANGE
     
     try:
-        with open(PARAMETER_FILE, "r") as f:
+        with open(PARAMETER_FILE, "r", encoding="utf-8") as f:
             params = json.load(f)
             
             # 加载配置信息
@@ -486,6 +569,8 @@ def load_parameters():
             legendary_screenshot_enabled = params.get("legendary_screenshot_enabled", True)
             # 加载字体大小设置
             font_size = params.get("font_size", 100)  # 默认100%
+            # 加载时间抖动范围
+            JITTER_RANGE = params.get("jitter_range", 15)
             # 加载热键设置（新格式支持组合键）
             saved_hotkey = params.get("hotkey", "F2")
             try:
@@ -523,6 +608,47 @@ def load_parameters():
     SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
     calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
     update_region_coords()  # 更新区域坐标
+    
+    # 添加分辨率验证逻辑，确保分辨率设置正确
+    # 获取当前系统实际分辨率
+    actual_width, actual_height = get_current_screen_resolution()
+    
+    # 计算当前目标分辨率与实际分辨率的差异
+    if resolution_choice in ["1080P", "2K", "4K"]:
+        # 对于预设分辨率，检查实际分辨率是否匹配
+        preset_width, preset_height = {
+            "1080P": (1920, 1080),
+            "2K": (2560, 1440),
+            "4K": (3840, 2160)
+        }[resolution_choice]
+        
+        # 计算宽度和高度差异百分比
+        width_diff = abs(preset_width - actual_width) / actual_width * 100
+        height_diff = abs(preset_height - actual_height) / actual_height * 100
+        
+        # 如果差异超过10%，自动切换到current模式
+        if width_diff > 10 or height_diff > 10:
+            print(f"⚠️  [警告] 保存的分辨率({resolution_choice})与实际分辨率({actual_width}×{actual_height})差异较大，自动切换到当前分辨率")
+            resolution_choice = "current"
+            TARGET_WIDTH, TARGET_HEIGHT = actual_width, actual_height
+            # 重新计算缩放比例
+            SCALE_X = TARGET_WIDTH / BASE_WIDTH
+            SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
+            calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
+            update_region_coords()  # 更新区域坐标
+    elif resolution_choice == "current":
+        # 对于current模式，确保使用的是最新的实际分辨率
+        if TARGET_WIDTH != actual_width or TARGET_HEIGHT != actual_height:
+            TARGET_WIDTH, TARGET_HEIGHT = actual_width, actual_height
+            # 重新计算缩放比例
+            SCALE_X = TARGET_WIDTH / BASE_WIDTH
+            SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
+            calculate_scale_factors()  # 计算所有缩放比例（包括SCALE_UNIFORM）
+            update_region_coords()  # 更新区域坐标
+    
+    # 更新全局当前分辨率变量
+    global CURRENT_SCREEN_WIDTH, CURRENT_SCREEN_HEIGHT
+    CURRENT_SCREEN_WIDTH, CURRENT_SCREEN_HEIGHT = actual_width, actual_height
 
 def switch_config(index):
     """切换配置，只更新5个核心钓鱼参数"""
@@ -571,11 +697,11 @@ def rename_config(index, new_name):
 # =========================
 def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paogantime_var, jiashi_var_option,
                       resolution_var, custom_width_var, custom_height_var, hotkey_var=None, record_fish_var=None,
-                      legendary_screenshot_var=None):
+                      legendary_screenshot_var=None, jitter_var=None):
     global t, leftclickdown, leftclickup, times, paogantime, jiashi_var
     global resolution_choice, TARGET_WIDTH, TARGET_HEIGHT, SCALE_X, SCALE_Y
     global hotkey_name, hotkey_modifiers, hotkey_main_key
-    global record_fish_enabled, legendary_screenshot_enabled
+    global record_fish_enabled, legendary_screenshot_enabled, JITTER_RANGE
 
     with param_lock:  # 使用锁保护参数更新
         try:
@@ -593,6 +719,10 @@ def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paog
             # 更新传说/传奇鱼自动截屏开关状态
             if legendary_screenshot_var is not None:
                 legendary_screenshot_enabled = bool(legendary_screenshot_var.get())
+            
+            # 更新时间抖动范围
+            if jitter_var is not None:
+                JITTER_RANGE = int(jitter_var.get())
 
             # 更新热键设置（新格式支持组合键）
             if hotkey_var is not None:
@@ -645,13 +775,14 @@ def update_parameters(t_var, leftclickdown_var, leftclickup_var, times_var, paog
             update_region_coords()  # 更新区域坐标
 
             print("┌" + "─" * 48 + "┐")
-            print("│  ⚙️  参数更新成功                              │")
+            print("│  ⚙️  参数更新成功                               │")
             print("├" + "─" * 48 + "┤")
             print(f"│  ⏱️  循环间隔: {t:.1f}s    📍 收线: {leftclickdown:.1f}s    📍 放线: {leftclickup:.1f}s")
             print(f"│  🎣 最大拉杆: {times}次     ⏳ 抛竿: {paogantime:.1f}s    {'✅' if jiashi_var else '❌'} 加时: {'是' if jiashi_var else '否'}")
             print(f"│  🖥️  分辨率: {resolution_choice} ({TARGET_WIDTH}×{TARGET_HEIGHT})")
             print(f"│  📐 缩放比例: X={SCALE_X:.2f}  Y={SCALE_Y:.2f}  统一={SCALE_UNIFORM:.2f}")
             print(f"│  ⌨️  热键: {hotkey_name}")
+            print(f"│  🎲 时间抖动: ±{JITTER_RANGE}%")
             print("└" + "─" * 48 + "┘")
             # 保存到文件
             save_parameters()
@@ -1082,8 +1213,8 @@ def create_gui():
         # 获取当前主窗口宽度
         window_width = root.winfo_width()
         
-        # 计算右侧面板的可用宽度（假设左侧面板宽度为280px，加上间距8px）
-        available_width = max(window_width - 288, 400)  # 最小400px
+        # 计算右侧面板的可用宽度（假设左侧面板宽度为250px，加上间距8px）
+        available_width = max(window_width - 200, 400)  # 最小400px
         
         # 调整比例，时间列与名称/重量列相同（时间:名称:品质:重量 = 63:63:36:63）
         time_ratio = 63   # 时间列比例改为63，与名称/重量列一致
@@ -1121,50 +1252,54 @@ def create_gui():
     main_frame.pack(fill=BOTH, expand=YES)
 
     # 配置主框架的行列权重
-    main_frame.columnconfigure(0, weight=0, minsize=280)  # 左侧面板最小宽度调整，确保设置项完整显示
-    main_frame.columnconfigure(1, weight=2, minsize=400)  # 右侧面板权重增加，更好地自适应扩展
+    main_frame.columnconfigure(0, weight=0)  # 左侧面板固定宽度
+    main_frame.columnconfigure(1, weight=1)  # 右侧面板自适应扩展
     main_frame.rowconfigure(0, weight=1)  # 内容区域自适应高度
 
     # ==================== 左侧面板（设置区域） ====================
-    left_panel = ttkb.Frame(main_frame)
+    left_panel = ttkb.Frame(main_frame, width=100)  # 设置左侧面板固定宽度
     left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+    left_panel.grid_propagate(False)  # 允许面板内容改变宽度
+    
+    # ==================== 固定标题区域 ====================
+    # 标题区域固定，不随滚动条滚动
+    title_frame = ttkb.Frame(left_panel)
+    title_frame.pack(fill=X, pady=(12, 8))
+
+    title_label = ttkb.Label(
+        title_frame,
+        text="🎣 PartyFish",
+        font=("Segoe UI", 16, "bold"),
+        bootstyle="primary"
+    )
+    title_label.pack()
+
+    subtitle_label = ttkb.Label(
+        title_frame,
+        text="自动钓鱼助手",
+        font=("Segoe UI", 10),
+        bootstyle="secondary"
+    )
+    subtitle_label.pack(pady=(2, 0))
+    
+    # 添加分隔线
+    separator = ttkb.Separator(left_panel, bootstyle="secondary")
+    separator.pack(fill=X, pady=(0, 8))
     
     # ==================== 垂直滚动条 ====================
     # 先添加垂直滚动条，确保它从顶部到底部，和左侧面板一样长
     left_scrollbar = ttkb.Scrollbar(
         left_panel,
         orient="vertical",
-        bootstyle="info"
+        bootstyle="secondary"
     )
-    left_scrollbar.pack(side=RIGHT, fill=Y)
-    
-    # ==================== 固定标题区域 ====================
-    # 标题区域固定，不随滚动条滚动
-    title_frame = ttkb.Frame(left_panel)
-    title_frame.pack(fill=X, pady=(0, 5))
-
-    title_label = ttkb.Label(
-        title_frame,
-        text="🎣 PartyFish",
-        bootstyle="light"
-    )
-    title_label.pack()
-
-    subtitle_label = ttkb.Label(
-        title_frame,
-        text="自动钓鱼参数配置",
-        bootstyle="light"
-    )
-    subtitle_label.pack()
-    
-    # 添加分隔线
-    separator = ttkb.Separator(left_panel, bootstyle="secondary")
-    separator.pack(fill=X, pady=(0, 5))
+    left_scrollbar.pack(side=RIGHT, fill=Y, pady=(0, 12))
     
     # ==================== 可滚动内容区域 ====================
     # 创建滚动容器，用于放置可滚动的内容
-    scrollable_content_frame = ttkb.Frame(left_panel)
-    scrollable_content_frame.pack(fill=BOTH, expand=YES, pady=(0, 0))
+    scrollable_content_frame = ttkb.Frame(left_panel, width=156)  # 180 - 24 (左右边距)
+    scrollable_content_frame.pack(fill=BOTH, expand=YES, padx=12, pady=(0, 12))
+    scrollable_content_frame.pack_propagate(False)  # 防止内容改变框架宽度
     
     # 创建Canvas作为滚动区域
     left_canvas = tk.Canvas(
@@ -1172,7 +1307,8 @@ def create_gui():
         yscrollcommand=left_scrollbar.set,
         background="#212529",  # 深色主题背景色，与ttkbootstrap darkly主题匹配
         highlightthickness=0,  # 去除Canvas的高亮边框
-        relief="flat"  # 平边框样式
+        relief="flat",  # 平边框样式
+        width=156  # 180 - 24 (左右边距)
     )
     left_canvas.pack(side=LEFT, fill=BOTH, expand=YES)
     
@@ -1379,6 +1515,13 @@ def create_gui():
             return handler
         entry.bind("<FocusOut>", on_entry_focusout(current_idx))
         
+        # 绑定右键点击保存配置名称
+        def on_entry_right_click(idx):
+            def handler(event):
+                save_config_name(idx, event)
+            return handler
+        entry.bind("<Button-3>", on_entry_right_click(current_idx))
+        
         # 初始隐藏输入框
         entry.grid(row=0, column=i, padx=2, sticky="ew")
         entry.grid_remove()
@@ -1394,27 +1537,36 @@ def create_gui():
     # 初始更新按钮样式
     update_config_buttons()
     
+    # 添加右键修改提示
+    tip_label = ttkb.Label(config_frame, text="可右键点击修改名字", font=("Segoe UI", 8), bootstyle="info", anchor="center")
+    tip_label.grid(row=1, column=0, columnspan=4, pady=(2, 0), sticky="ew")
+    
     # ==================== 钓鱼参数卡片 ====================
     params_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⚙️ 钓鱼参数 ",
-        padding=8,
+        padding=12,
         bootstyle="info"
     )
-    params_card.pack(fill=X, pady=(0, 4))
+    params_card.pack(fill=X, pady=(0, 8))
 
-    # 参数输入样式
+    # 参数输入样式 - 优化布局和样式
     def create_param_row(parent, label_text, var, row, tooltip=""):
-        label = ttkb.Label(parent, text=label_text)
-        label.grid(row=row, column=0, sticky=W, pady=3, padx=(0, 8))
+        # 使用更紧凑的布局
+        label = ttkb.Label(parent, text=label_text, font=("Segoe UI", 9), bootstyle="info")
+        label.grid(row=row, column=0, sticky=W, pady=4, padx=(0, 8))
 
-        entry = ttkb.Entry(parent, textvariable=var, width=10)
-        entry.grid(row=row, column=1, sticky=E, pady=3)
+        entry = ttkb.Entry(parent, textvariable=var, width=12, font=("Segoe UI", 9))
+        entry.grid(row=row, column=1, sticky=E, pady=4)
         
         # 保存输入框引用到全局列表
         input_entries.append(entry)
         
         return entry
+
+    # 配置列宽 - 更合理的比例
+    params_card.columnconfigure(0, weight=1, minsize=100)
+    params_card.columnconfigure(1, weight=0, minsize=60)
 
     # 循环间隔
     t_var = ttkb.StringVar(value=str(t))
@@ -1436,29 +1588,25 @@ def create_gui():
     paogantime_var = ttkb.StringVar(value=str(paogantime))
     create_param_row(params_card, "抛竿时间 (秒)", paogantime_var, 4)
 
-    # 配置列宽
-    params_card.columnconfigure(0, weight=1)
-    params_card.columnconfigure(1, weight=0)
-
     # ==================== 加时选项卡片 ====================
     jiashi_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⏱️ 加时选项 ",
-        padding=8,
+        padding=12,
         bootstyle="warning"
     )
-    jiashi_card.pack(fill=X, pady=(0, 4))
+    jiashi_card.pack(fill=X, pady=(0, 8))
 
     jiashi_var_option = ttkb.IntVar(value=jiashi_var)
 
     jiashi_frame = ttkb.Frame(jiashi_card)
-    jiashi_frame.pack(fill=X)
+    jiashi_frame.pack(fill=X, pady=4)
 
-    jiashi_label = ttkb.Label(jiashi_frame, text="是否自动加时")
-    jiashi_label.pack(side=LEFT)
+    jiashi_label = ttkb.Label(jiashi_frame, text="是否自动加时", font=("Segoe UI", 9), bootstyle="warning")
+    jiashi_label.pack(side=LEFT, padx=4)
 
     jiashi_btn_frame = ttkb.Frame(jiashi_frame)
-    jiashi_btn_frame.pack(side=RIGHT)
+    jiashi_btn_frame.pack(side=RIGHT, padx=4)
 
     jiashi_yes = ttkb.Radiobutton(
         jiashi_btn_frame,
@@ -1478,14 +1626,71 @@ def create_gui():
     )
     jiashi_no.pack(side=LEFT, padx=5)
 
+    # ==================== 时间抖动设置卡片 ====================
+    jitter_card = ttkb.Labelframe(
+        left_content_frame,
+        text=" 🎲 时间抖动设置 ",
+        padding=12,
+        bootstyle="warning"
+    )
+    jitter_card.pack(fill=X, pady=(0, 8))
+    
+    # 时间抖动变量
+    jitter_var = ttkb.IntVar(value=JITTER_RANGE)
+    
+    # 创建水平布局框架
+    jitter_frame = ttkb.Frame(jitter_card)
+    jitter_frame.pack(fill=X, pady=(4, 0))
+    
+    # 时间抖动范围标签
+    jitter_label = ttkb.Label(jitter_frame, text="时间抖动范围 (±%):", bootstyle="warning", font=("Segoe UI", 9))
+    jitter_label.pack(side=LEFT, padx=(0, 8))
+    
+    # 时间抖动滑块
+    jitter_slider = ttkb.Scale(
+        jitter_frame,
+        from_=0,
+        to=30,
+        orient="horizontal",
+        variable=jitter_var,
+        bootstyle="warning",
+        length=160,
+        cursor="hand2"
+    )
+    jitter_slider.pack(side=LEFT, padx=8, fill=X, expand=True)
+    
+    # 时间抖动数值显示 - 更醒目的样式
+    jitter_value_label = ttkb.Label(jitter_frame, text=f"{jitter_var.get()}%", bootstyle="warning", font=("Segoe UI", 10, "bold"))
+    jitter_value_label.pack(side=LEFT, padx=(0, 4))
+    
+    # 时间抖动说明文字 - 优化样式
+    jitter_info_label = ttkb.Label(
+        jitter_card,
+        text="在抛竿和收杆时间上添加随机波动，避免检测",
+        bootstyle="info",
+        font=("Segoe UI", 8)
+    )
+    jitter_info_label.pack(pady=(8, 4), padx=4)
+    
+    # 时间抖动滑块变化事件处理
+    def on_jitter_change(*args):
+        update_parameters(
+            t_var, leftclickdown_var, leftclickup_var, times_var, paogantime_var,
+            jiashi_var_option, resolution_var, custom_width_var, custom_height_var,
+            hotkey_var, record_fish_var, legendary_screenshot_var, jitter_var=jitter_var
+        )
+        jitter_value_label.configure(text=f"{jitter_var.get()}%")
+    
+    jitter_slider.configure(command=on_jitter_change)
+
     # ==================== 热键设置卡片 ====================
     hotkey_card = ttkb.Labelframe(
         left_content_frame,
         text=" ⌨️ 热键设置 ",
-        padding=8,
-        bootstyle="secondary"
+        padding=12,
+        bootstyle="primary"
     )
-    hotkey_card.pack(fill=X, pady=(0, 4))
+    hotkey_card.pack(fill=X, pady=(0, 8))
 
     # 热键显示变量
     hotkey_var = ttkb.StringVar(value=hotkey_name)
@@ -1498,33 +1703,35 @@ def create_gui():
     capture_listener = [None]
 
     hotkey_frame = ttkb.Frame(hotkey_card)
-    hotkey_frame.pack(fill=X)
+    hotkey_frame.pack(fill=X, pady=4)
 
-    hotkey_label = ttkb.Label(hotkey_frame, text="启动/暂停热键")
-    hotkey_label.pack(side=LEFT)
+    hotkey_label = ttkb.Label(hotkey_frame, text="启动/暂停热键", font=("Segoe UI", 9, "bold"), bootstyle="primary")
+    hotkey_label.pack(side=LEFT, padx=(0, 8))
 
     # 热键显示按钮（点击后进入捕获模式）
     hotkey_btn = ttkb.Button(
         hotkey_frame,
         text=hotkey_name,
-        bootstyle="info-outline",
-        width=14
+        bootstyle="primary",
+        width=12
     )
-    hotkey_btn.pack(side=RIGHT)
+    hotkey_btn.pack(side=RIGHT, padx=(8, 0))
 
     # 热键信息提示（合并显示，点击按钮时会变化）
     hotkey_info_label = ttkb.Label(
         hotkey_card,
         text=f"按 {hotkey_name} 启动/暂停 | 点击按钮修改",
-        bootstyle="info"
+        bootstyle="primary",
+        font=("Segoe UI", 8, "bold")
     )
-    hotkey_info_label.pack(pady=(3, 0))
+    hotkey_info_label.pack(pady=(4, 0), padx=4)
 
     # 提示标签（用于捕获模式显示）
     hotkey_tip_label = ttkb.Label(
         hotkey_card,
         text="",
-        bootstyle="secondary"
+        bootstyle="secondary",
+        font=("Segoe UI", 8)
     )
 
     def stop_hotkey_capture():
@@ -1663,10 +1870,10 @@ def create_gui():
     resolution_card = ttkb.Labelframe(
         left_content_frame,
         text=" 🖥️ 分辨率设置 ",
-        padding=8,
+        padding=12,
         bootstyle="success"
     )
-    resolution_card.pack(fill=X, pady=(0, 4))
+    resolution_card.pack(fill=X, pady=(0, 8))
 
     resolution_var = ttkb.StringVar(value=resolution_choice)
     custom_width_var = ttkb.StringVar(value=str(TARGET_WIDTH))
@@ -1674,32 +1881,10 @@ def create_gui():
 
     # 分辨率选择按钮组（使用2x2网格布局）
     res_btn_frame = ttkb.Frame(resolution_card)
-    res_btn_frame.pack(fill=X, pady=(0, 6))
-# 分辨率选择（2x2网格布局）
+    res_btn_frame.pack(fill=X, pady=(0, 8))
+
+    # 分辨率选择（2x2网格布局）
     resolutions = [("1080P", "1080P"), ("2K", "2K"), ("4K", "4K"), ("当前", "current"), ("自定义", "自定义")]
-
-    # 自定义分辨率输入框容器
-    custom_frame = ttkb.Frame(resolution_card)
-
-    custom_width_label = ttkb.Label(custom_frame, text="宽:")
-    custom_width_label.pack(side=LEFT, padx=(0, 3))
-
-    custom_width_entry = ttkb.Entry(custom_frame, textvariable=custom_width_var, width=6)
-    custom_width_entry.pack(side=LEFT, padx=(0, 10))
-
-    custom_height_label = ttkb.Label(custom_frame, text="高:")
-    custom_height_label.pack(side=LEFT, padx=(0, 3))
-
-    custom_height_entry = ttkb.Entry(custom_frame, textvariable=custom_height_var, width=6)
-    custom_height_entry.pack(side=LEFT)
-
-    # 当前分辨率信息标签
-    resolution_info_var = ttkb.StringVar(value=f"当前: {TARGET_WIDTH}×{TARGET_HEIGHT}")
-    info_label = ttkb.Label(
-        resolution_card,
-        textvariable=resolution_info_var,
-        bootstyle="info"
-    )
 
     def update_resolution_info():
         res = resolution_var.get()
@@ -1717,7 +1902,7 @@ def create_gui():
             resolution_info_var.set(f"当前: {custom_width_var.get()}×{custom_height_var.get()}")
 
     def on_resolution_change():
-        """当分辨率选择改变时，更新自定义输入框状态"""
+        """当分辨率选择改变时，更新自定义输入框状态并保存更改"""
         # 更新分辨率信息
         update_resolution_info()
         
@@ -1736,11 +1921,20 @@ def create_gui():
         elif resolution_var.get() == "4K":
             custom_width_var.set("3840")
             custom_height_var.set("2160")
-
+        
+        # 保存分辨率更改
+        update_parameters(
+            t_var, leftclickdown_var, leftclickup_var, times_var,
+            paogantime_var, jiashi_var_option, resolution_var,
+            custom_width_var, custom_height_var, hotkey_var, record_fish_var,
+            legendary_screenshot_var
+        )
 
     # 创建分辨率选择按钮（3行2列布局）
-    res_btn_frame.columnconfigure(0, weight=1)
-    res_btn_frame.columnconfigure(1, weight=1)
+    # 配置第3列（索引2）的权重为8，用于控制自定义分辨率输入框区域的横向扩展比例
+    res_btn_frame.columnconfigure(0, weight=9)
+    # 配置第9列（索引8）的权重为2，用于控制右侧空白区域的横向扩展比例，保持布局平衡
+    res_btn_frame.columnconfigure(3, weight=1)
     
     # 3行2列布局排列：
     # 第1行: 1080P, 2K
@@ -1754,7 +1948,6 @@ def create_gui():
         variable=resolution_var,
         value="1080P",
         bootstyle="info-outline-toolbutton",
-        width=10,
         command=on_resolution_change
     )
     rb_1080p.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
@@ -1765,7 +1958,6 @@ def create_gui():
         variable=resolution_var,
         value="2K",
         bootstyle="info-outline-toolbutton",
-        width=10,
         command=on_resolution_change
     )
     rb_2k.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
@@ -1777,7 +1969,6 @@ def create_gui():
         variable=resolution_var,
         value="4K",
         bootstyle="info-outline-toolbutton",
-        width=10,
         command=on_resolution_change
     )
     rb_4k.grid(row=1, column=0, padx=2, pady=2, sticky="ew")
@@ -1788,7 +1979,6 @@ def create_gui():
         variable=resolution_var,
         value="current",
         bootstyle="info-outline-toolbutton",
-        width=10,
         command=on_resolution_change
     )
     rb_current.grid(row=1, column=1, padx=2, pady=2, sticky="ew")
@@ -1800,7 +1990,6 @@ def create_gui():
         variable=resolution_var,
         value="自定义",
         bootstyle="info-outline-toolbutton",
-        width=10,
         command=on_resolution_change
     )
     rb_custom.grid(row=2, column=0, padx=2, pady=2, sticky="ew")
@@ -1809,38 +1998,74 @@ def create_gui():
     custom_input_frame = ttkb.Frame(res_btn_frame)
     custom_input_frame.grid(row=2, column=1, padx=2, pady=2, sticky="ew")
     
-    custom_width_label = ttkb.Label(custom_input_frame, text="宽:", width=2)
+    custom_width_label = ttkb.Label(custom_input_frame, text="宽:", width=2, font=("Segoe UI", 9))
     custom_width_label.pack(side=LEFT, padx=(0, 2))
 
-    custom_width_entry = ttkb.Entry(custom_input_frame, textvariable=custom_width_var, width=5)
+    custom_width_entry = ttkb.Entry(custom_input_frame, textvariable=custom_width_var, width=5, font=("Segoe UI", 9))
     custom_width_entry.pack(side=LEFT, padx=(0, 8))
+    
+    # 为自定义宽度输入框添加事件处理
+    def on_custom_width_change(event):
+        """当自定义宽度改变时，保存更改"""
+        if resolution_var.get() == "自定义":
+            update_parameters(
+                t_var, leftclickdown_var, leftclickup_var, times_var,
+                paogantime_var, jiashi_var_option, resolution_var,
+                custom_width_var, custom_height_var, hotkey_var, record_fish_var,
+                legendary_screenshot_var
+            )
+    
+    custom_width_entry.bind("<FocusOut>", on_custom_width_change)
+    custom_width_entry.bind("<Return>", on_custom_width_change)
 
-    custom_height_label = ttkb.Label(custom_input_frame, text="高:", width=2)
+    custom_height_label = ttkb.Label(custom_input_frame, text="高:", width=2, font=("Segoe UI", 9))
     custom_height_label.pack(side=LEFT, padx=(0, 2))
 
-    custom_height_entry = ttkb.Entry(custom_input_frame, textvariable=custom_height_var, width=5)
+    custom_height_entry = ttkb.Entry(custom_input_frame, textvariable=custom_height_var, width=5, font=("Segoe UI", 9))
     custom_height_entry.pack(side=LEFT)
     
+    # 为自定义高度输入框添加事件处理
+    def on_custom_height_change(event):
+        """当自定义高度改变时，保存更改"""
+        if resolution_var.get() == "自定义":
+            update_parameters(
+                t_var, leftclickdown_var, leftclickup_var, times_var,
+                paogantime_var, jiashi_var_option, resolution_var,
+                custom_width_var, custom_height_var, hotkey_var, record_fish_var,
+                legendary_screenshot_var
+            )
+    
+    custom_height_entry.bind("<FocusOut>", on_custom_height_change)
+    custom_height_entry.bind("<Return>", on_custom_height_change)
+    
+    # 当前分辨率信息标签
+    resolution_info_var = ttkb.StringVar(value=f"当前: {TARGET_WIDTH}×{TARGET_HEIGHT}")
+    info_label = ttkb.Label(
+        resolution_card,
+        textvariable=resolution_info_var,
+        bootstyle="info",
+        font=("Segoe UI", 9)
+    )
     # 始终显示分辨率信息标签
-    info_label.pack(pady=(8, 0))
+    info_label.pack(pady=(4, 0))
 
     # ==================== 钓鱼记录开关卡片 ====================
     record_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 钓鱼记录设置 ",
-        padding=8,
+        padding=12,
         bootstyle="info"
     )
-    record_card.pack(fill=X, pady=(0, 4))
+    record_card.pack(fill=X, pady=(0, 8))
 
     # 钓鱼记录开关
     record_fish_var = ttkb.IntVar(value=1 if record_fish_enabled else 0)
 
     record_frame = ttkb.Frame(record_card)
-    record_frame.pack(fill=X)
+    record_frame.pack(fill=X, pady=4)
 
-    record_label = ttkb.Label(record_frame, text="是否启用钓鱼记录")
-    record_label.pack(side=LEFT)
+    record_label = ttkb.Label(record_frame, text="是否启用钓鱼记录", font=("Segoe UI", 9), bootstyle="info")
+    record_label.pack(side=LEFT, padx=(0, 8))
 
     record_btn_frame = ttkb.Frame(record_frame)
     record_btn_frame.pack(side=RIGHT)
@@ -1867,10 +2092,10 @@ def create_gui():
     legendary_screenshot_var = ttkb.IntVar(value=1 if legendary_screenshot_enabled else 0)
     
     legendary_frame = ttkb.Frame(record_card)
-    legendary_frame.pack(fill=X, pady=(5, 0))
+    legendary_frame.pack(fill=X, pady=4)
     
-    legendary_label = ttkb.Label(legendary_frame, text="传说/传奇鱼自动截屏")
-    legendary_label.pack(side=LEFT)
+    legendary_label = ttkb.Label(legendary_frame, text="传说/传奇鱼自动截屏", font=("Segoe UI", 9), bootstyle="info")
+    legendary_label.pack(side=LEFT, padx=(0, 8))
     
     legendary_btn_frame = ttkb.Frame(legendary_frame)
     legendary_btn_frame.pack(side=RIGHT)
@@ -1897,10 +2122,10 @@ def create_gui():
     font_size_card = ttkb.Labelframe(
         left_content_frame,
         text=" 📝 字体大小设置 ",
-        padding=8,
+        padding=12,
         bootstyle="info"
     )
-    font_size_card.pack(fill=X, pady=(0, 4))
+    font_size_card.pack(fill=X, pady=(0, 8))
 
     # 字体大小变量
     font_size_var = ttkb.IntVar(value=font_size)
@@ -1913,10 +2138,10 @@ def create_gui():
         orient="horizontal",
         variable=font_size_var,
         bootstyle="info",  # 使用标准样式
-        length=220,  # 增加滑块长度
+        length=180,  # 优化滑块长度
         cursor="hand2"  # 鼠标悬停时显示手型光标
     )
-    font_slider.pack(pady=(8, 5))
+    font_slider.pack(pady=(8, 8))
 
     # 字体大小显示标签 - 美化显示
     font_size_display = ttkb.Label(
@@ -1927,18 +2152,14 @@ def create_gui():
     )
     font_size_display.pack(pady=(0, 8))
 
-    # 预设按钮框架 - 使用两行布局
+    # 预设按钮框架 - 使用网格布局
     preset_frame = ttkb.Frame(font_size_card)
-    preset_frame.pack(fill=X, pady=(0, 4))
+    preset_frame.pack(fill=X, pady=(0, 8))
     
-    # 第一行预设按钮框架
-    preset_row1 = ttkb.Frame(preset_frame)
-    preset_row1.pack(fill=X)
+    # 配置网格布局
+    preset_frame.columnconfigure(0, weight=1)
+    preset_frame.columnconfigure(1, weight=1)
     
-    # 第二行预设按钮框架
-    preset_row2 = ttkb.Frame(preset_frame)
-    preset_row2.pack(fill=X)
-
     # 字体大小预设配置 - 简化文本，适合大字体显示
     font_presets = [
         ("小 (50%)", 50),    # 50% 字体大小
@@ -1969,22 +2190,23 @@ def create_gui():
                 # 未选中的预设，使用轮廓样式
                 btn.configure(bootstyle="info-outline")
     
-    # 创建预设按钮，两行布局
+    # 创建预设按钮，网格布局
     for i, (text, size) in enumerate(font_presets):
-        # 选择按钮所在的行
-        current_row = preset_row1 if i < 2 else preset_row2
+        # 计算网格位置
+        row = i // 2
+        col = i % 2
         
         preset_btn = ttkb.Button(
-            current_row,
+            preset_frame,
             text=text,
             command=lambda v=size: set_font_size(v),
             bootstyle="info-outline",  # 默认轮廓样式
-            width=10,  # 减小按钮宽度，适应大字体
+            width=10,  # 合适的按钮宽度
             padding=(3, 2),  # 优化内边距，更紧凑
             cursor="hand2"  # 鼠标悬停时显示手型光标
         )
-        # 每行两个按钮，各占50%宽度
-        preset_btn.pack(side=LEFT, padx=2, pady=2, expand=True, fill=X)
+        # 网格布局，每行两个按钮
+        preset_btn.grid(row=row, column=col, padx=2, pady=2, sticky="ew")
         
         # 保存按钮引用
         preset_button_dict[size] = preset_btn
@@ -2000,7 +2222,7 @@ def create_gui():
         command=lambda: update_font_size(),
         bootstyle="success-outline"
     )
-    apply_font_btn.pack(fill=X, pady=(5, 0))
+    apply_font_btn.pack(fill=X, pady=(0, 4))
 
     # 定义字体大小更新函数
     def update_font_size():
@@ -2245,9 +2467,9 @@ def create_gui():
     combo_boxes.append(quality_combo)
 
     # 统计信息卡片
-    # 设置自定义紫色边框
-    style.configure("Purple.TLabelframe", bordercolor="#9B59B6")
-    style.configure("Purple.TLabelframe.Label", foreground="#9B59B6")
+    # 设置自定义亮色主题，与深色背景搭配
+    style.configure("Custom.TLabelframe", bordercolor="#4F46E5")
+    style.configure("Custom.TLabelframe.Label", foreground="#E2E8F0", font=('Segoe UI', 10, 'bold'))
     
     stats_card = ttkb.Labelframe(
         fish_record_card,
@@ -2255,13 +2477,9 @@ def create_gui():
         padding=15,
         bootstyle="primary"
     )
-    stats_card.pack(fill=X, pady=(0, 10))
+    stats_card.pack(fill=X, pady=(0, 12))
     stats_card.configure(relief="solid", borderwidth=1)
-    stats_card.configure(style="Purple.TLabelframe")
-    
-    # 品质统计框架 - 网格布局
-    stats_grid = ttkb.Frame(stats_card)
-    stats_grid.pack(fill=X, expand=True)
+    stats_card.configure(style="Custom.TLabelframe")
     
     # 创建统计标签变量
     standard_var = ttkb.StringVar(value="⚪ 标准: 0 (0.00%)")
@@ -2271,40 +2489,58 @@ def create_gui():
     legendary_var = ttkb.StringVar(value="🟡 传说: 0 (0.00%)")
     total_var = ttkb.StringVar(value="📝 总计: 0 条")
     
-    # 品质统计标签 - 网格布局
-    standard_label = ttkb.Label(stats_grid, textvariable=standard_var, foreground="#FFFFFF")
-    standard_label.pack(side=LEFT, padx=10, pady=8, expand=True, fill=X)
+    # 品质统计布局 - 更美观的网格布局
+    stats_grid = ttkb.Frame(stats_card)
+    stats_grid.pack(fill=BOTH, expand=YES, side=LEFT)
     
-    uncommon_label = ttkb.Label(stats_grid, textvariable=uncommon_var, foreground="#2ECC71")
-    uncommon_label.pack(side=LEFT, padx=10, pady=8, expand=True, fill=X)
+    # 品质统计容器
+    quality_stats_frame = ttkb.Frame(stats_grid)
+    quality_stats_frame.pack(side=LEFT, fill=X, expand=YES)
     
-    rare_label = ttkb.Label(stats_grid, textvariable=rare_var, foreground="#1E90FF")
-    rare_label.pack(side=LEFT, padx=10, pady=8, expand=True, fill=X)
+    # 第一行：标准、非凡、稀有
+    row1_frame = ttkb.Frame(quality_stats_frame)
+    row1_frame.pack(fill=X, pady=(0, 5))
     
-    epic_label = ttkb.Label(stats_grid, textvariable=epic_var, foreground="#9B59B6")
-    epic_label.pack(side=LEFT, padx=10, pady=8, expand=True, fill=X)
+    standard_label = ttkb.Label(row1_frame, textvariable=standard_var, foreground="#94A3B8", font=("Segoe UI", 9, "bold"))
+    standard_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
     
-    legendary_label = ttkb.Label(stats_grid, textvariable=legendary_var, foreground="#F1C40F")
-    legendary_label.pack(side=LEFT, padx=10, pady=8, expand=True, fill=X)
+    uncommon_label = ttkb.Label(row1_frame, textvariable=uncommon_var, foreground="#34D399", font=("Segoe UI", 9, "bold"))
+    uncommon_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
     
-    # 总计和清空按钮框架
-    total_frame = ttkb.Frame(stats_card)
-    total_frame.pack(fill=X, expand=True)
+    rare_label = ttkb.Label(row1_frame, textvariable=rare_var, foreground="#60A5FA", font=("Segoe UI", 9, "bold"))
+    rare_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
     
-    total_label = ttkb.Label(total_frame, textvariable=total_var, bootstyle="success")
-    total_label.pack(side=LEFT, padx=10, pady=8)
+    # 第二行：史诗、传说、总计
+    row2_frame = ttkb.Frame(quality_stats_frame)
+    row2_frame.pack(fill=X, pady=(5, 0))
     
-    # 清空按钮
+    epic_label = ttkb.Label(row2_frame, textvariable=epic_var, foreground="#A78BFA", font=("Segoe UI", 9, "bold"))
+    epic_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
+    
+    legendary_label = ttkb.Label(row2_frame, textvariable=legendary_var, foreground="#FBBF24", font=("Segoe UI", 9, "bold"))
+    legendary_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
+    
+    total_label = ttkb.Label(row2_frame, textvariable=total_var, foreground="#64748B", font=("Segoe UI", 9, "bold"))
+    total_label.pack(side=LEFT, padx=12, pady=3, expand=YES)
+    
+    # 清空按钮 - 更优雅的设计
+    button_frame = ttkb.Frame(stats_card)
+    button_frame.pack(side=RIGHT, fill=Y, padx=(10, 0))
+    
     clear_btn = ttkb.Button(
-        total_frame,
+        button_frame,
         text="🗑️ 清空记录",
         command=lambda: clear_fish_records(),
         bootstyle="danger-outline"
     )
-    clear_btn.pack(side=RIGHT, padx=10, pady=8)
+    clear_btn.pack(side=TOP, pady=5, padx=5)
     
-    # 记录列表容器（包含Treeview和滚动条）
-    tree_container = ttkb.Frame(fish_record_card)
+    # 统计卡片和Treeview之间的分隔线
+    divider = ttkb.Separator(fish_record_card, orient="horizontal")
+    divider.pack(fill=X, pady=10)
+
+    # 记录列表容器（包含Treeview和滚动条）- 现代化设计
+    tree_container = ttkb.Frame(fish_record_card, borderwidth=1, relief="solid")
     tree_container.pack(fill=BOTH, expand=YES, pady=(0, 8))
 
     # 记录列表（使用Treeview）
@@ -2321,34 +2557,58 @@ def create_gui():
     fish_tree_ref = fish_tree
 
     # 添加垂直滚动条（放在Treeview右侧）
-    tree_scroll = ttkb.Scrollbar(tree_container, orient="vertical", command=fish_tree.yview, bootstyle="rounded")
+    tree_scroll = ttkb.Scrollbar(tree_container, orient="vertical", command=fish_tree.yview, bootstyle="secondary")
     fish_tree.configure(yscrollcommand=tree_scroll.set)
 
+    # 设置列标题样式 - 现代化设计
+    style.configure("CustomTreeview.Treeview.Heading", 
+                   background="#3B82F6", 
+                   foreground="#ffffff", 
+                   font=("Segoe UI", 10, "bold"),
+                   borderwidth=0,
+                   relief="flat",
+                   padding=(10, 5))
+
     # 设置列标题
-    fish_tree.heading("时间", text="时间")
-    fish_tree.heading("名称", text="鱼名")
-    fish_tree.heading("品质", text="品质")
-    fish_tree.heading("重量", text="重量")
+    fish_tree.heading("时间", text="时间", anchor="center")
+    fish_tree.heading("名称", text="鱼名", anchor="center")
+    fish_tree.heading("品质", text="品质", anchor="center")
+    fish_tree.heading("重量", text="重量", anchor="center")
 
     # 不设置固定列宽，而是在程序初始化后调用动态调整列宽的函数
     # 初始化列宽为0，稍后会根据字体大小动态调整
-    fish_tree.column("时间", width=0, anchor="center", stretch=YES)  # 启用自动拉伸
-    fish_tree.column("名称", width=0, anchor="center", stretch=YES)      # 启用自动拉伸
-    fish_tree.column("品质", width=0, anchor="center", stretch=YES) # 启用自动拉伸
-    fish_tree.column("重量", width=0, anchor="center", stretch=YES) # 启用自动拉伸
+    fish_tree.column("时间", width=0, anchor="center", stretch=YES, minwidth=120)  # 启用自动拉伸
+    fish_tree.column("名称", width=0, anchor="center", stretch=YES, minwidth=150)      # 启用自动拉伸
+    fish_tree.column("品质", width=0, anchor="center", stretch=YES, minwidth=80) # 启用自动拉伸
+    fish_tree.column("重量", width=0, anchor="center", stretch=YES, minwidth=100) # 启用自动拉伸
 
     # 布局Treeview和滚动条
     fish_tree.pack(side=LEFT, fill=BOTH, expand=YES)
     tree_scroll.pack(side=RIGHT, fill=Y)
 
-    # 配置品质颜色标签（背景色和前景色）
-    # 标准-白色背景黑色字体, 非凡-绿色, 稀有-海洋蓝色, 史诗-紫色, 传说/传奇-金色
+    # 配置品质颜色标签（背景色和前景色）- 优化配色方案
+    # 标准-浅灰色, 非凡-清新绿, 稀有-海洋蓝, 史诗-优雅紫, 传说/传奇-尊贵金
+    # 文字颜色统一为黑色，背景色使用更鲜艳的颜色
     fish_tree.tag_configure("标准", background="#FFFFFF", foreground="#000000")
     fish_tree.tag_configure("非凡", background="#2ECC71", foreground="#000000")
     fish_tree.tag_configure("稀有", background="#1E90FF", foreground="#FFFFFF")
     fish_tree.tag_configure("史诗", background="#9B59B6", foreground="#FFFFFF")
     fish_tree.tag_configure("传说", background="#F1C40F", foreground="#000000")
     fish_tree.tag_configure("传奇", background="#F1C40F", foreground="#000000")  # 传奇与传说同色
+
+    # 设置Treeview行高和字体 - 现代化设计
+    # 移除background和fieldbackground设置，让标签背景色能够显示
+    style.configure("CustomTreeview.Treeview", 
+                   font=("Segoe UI", 9, "bold"),
+                   foreground="#1E293B",
+                   rowheight=28,
+                   bordercolor="#E2E8F0",
+                   relief="flat")
+    
+    # 设置Treeview选中项样式
+    style.map("CustomTreeview.Treeview",
+             background=[("selected", "#3B82F6")],
+             foreground=[("selected", "#FFFFFF")])
 
     # 绑定鼠标滚轮到Treeview
     def on_tree_mousewheel(event):
@@ -2445,20 +2705,34 @@ def create_gui():
             "传说": "🟡"
         }
         
-        # 格式化显示，添加图标和更美观的样式
-        standard_var.set(f"{quality_icons['标准']} 标准: {quality_counts['标准']} ({calc_percentage(quality_counts['标准']):.2f}%)")
-        uncommon_var.set(f"{quality_icons['非凡']} 非凡: {quality_counts['非凡']} ({calc_percentage(quality_counts['非凡']):.2f}%)")
-        rare_var.set(f"{quality_icons['稀有']} 稀有: {quality_counts['稀有']} ({calc_percentage(quality_counts['稀有']):.2f}%)")
-        epic_var.set(f"{quality_icons['史诗']} 史诗: {quality_counts['史诗']} ({calc_percentage(quality_counts['史诗']):.2f}%)")
-        legendary_var.set(f"{quality_icons['传说']} 传说: {total_legendary} ({calc_percentage(total_legendary):.2f}%)")
+        # 格式化显示，优化样式和颜色
+        def format_quality_stat(icon, name, count, percentage):
+            # 品质名称与颜色映射
+            color_map = {
+                "标准": "#64748B",
+                "非凡": "#10B981",
+                "稀有": "#3B82F6",
+                "史诗": "#8B5CF6",
+                "传说": "#F59E0B"
+            }
+            color = color_map.get(name, "#64748B")
+            return f"{icon} {name}: <span style='color:{color}; font-weight:bold;'>{count}</span> (<span style='color:{color};'>{percentage:.2f}%</span>)"
+
+        # 更新品质统计标签
+        standard_var.set(f"⚪ 标准: {quality_counts['标准']} ({calc_percentage(quality_counts['标准']):.2f}%)")
+        uncommon_var.set(f"🟢 非凡: {quality_counts['非凡']} ({calc_percentage(quality_counts['非凡']):.2f}%)")
+        rare_var.set(f"🔵 稀有: {quality_counts['稀有']} ({calc_percentage(quality_counts['稀有']):.2f}%)")
+        epic_var.set(f"🟣 史诗: {quality_counts['史诗']} ({calc_percentage(quality_counts['史诗']):.2f}%)")
+        legendary_var.set(f"🟡 传说: {total_legendary} ({calc_percentage(total_legendary):.2f}%)")
         
         # 根据视图模式更新总计显示
+        total_icon = "📊"
         if mode == "current":
-            total_var.set(f"📊 本次总计: {total} 条")
+            total_var.set(f"{total_icon} 本次总计: {total} 条")
         elif mode == "today":
-            total_var.set(f"📊 当天总计: {total} 条")
+            total_var.set(f"{total_icon} 当天总计: {total} 条")
         else:
-            total_var.set(f"📊 历史总计: {total} 条")
+            total_var.set(f"{total_icon} 历史总计: {total} 条")
 
         # 显示记录（倒序，最新的在前面）
         for record in reversed(filtered[-100:]):  # 最多显示100条
@@ -2531,10 +2805,12 @@ def create_gui():
 
     # ==================== 操作按钮区域（左侧面板底部） ====================
     btn_frame = ttkb.Frame(left_content_frame)
-    btn_frame.pack(fill=X, pady=(8, 0))
+    btn_frame.pack(fill=X, pady=(12, 0))
 
+    # 使用网格布局实现更紧凑的按钮排列
+    btn_frame.columnconfigure(0, weight=1)
+    btn_frame.columnconfigure(1, weight=1)
 
-    
     def update_and_refresh():
         """更新参数并刷新显示"""
         update_parameters(
@@ -2555,9 +2831,9 @@ def create_gui():
         text="💾 保存设置",
         command=update_and_refresh,
         bootstyle="success",
-        width=16
+        width=0  # 让按钮自动扩展
     )
-    update_button.pack(pady=3, fill=X)
+    update_button.grid(row=0, column=0, padx=2, pady=2, sticky="ew")
 
     # 调试按钮
     debug_button = ttkb.Button(
@@ -2565,62 +2841,150 @@ def create_gui():
         text="🐛 调试",
         command=show_debug_window,
         bootstyle="warning-outline",
-        width=16
+        width=0  # 让按钮自动扩展
     )
-    debug_button.pack(pady=3, fill=X)
+    debug_button.grid(row=0, column=1, padx=2, pady=2, sticky="ew")
 
     # ==================== 状态栏（左侧面板底部） ====================
     status_frame = ttkb.Frame(left_panel)
-    status_frame.pack(fill=X, pady=(8, 0))
+    status_frame.pack(fill=X, pady=(8, 12), padx=12)
 
     separator = ttkb.Separator(status_frame, bootstyle="secondary")
-    separator.pack(fill=X, pady=(0, 5))
+    separator.pack(fill=X, pady=(0, 8))
+
+    # 状态栏内容框架 - 使用pack布局
+    status_content_frame = ttkb.Frame(status_frame)
+    status_content_frame.pack(fill=X, expand=YES)
+
+    # 左侧内容 - 使用pack布局
+    left_status_frame = ttkb.Frame(status_content_frame)
+    left_status_frame.pack(side=LEFT, fill=Y)
 
     status_label = ttkb.Label(
-        status_frame,
+        left_status_frame,
         text=f"按 {hotkey_name} 启动/暂停",
-        bootstyle="light"
+        bootstyle="light",
+        font=("Segoe UI", 9, "bold")
     )
-    status_label.pack()
+    status_label.pack(anchor="w")
 
     version_label = ttkb.Label(
-        status_frame,
-        text="v2.8.beta-3 | PartyFish",
-        bootstyle="light"
+        left_status_frame,
+        text="v.2.9-beta-2 | PartyFish",
+        bootstyle="light",
+        font=("Segoe UI", 8, "bold")
     )
-    version_label.pack(pady=(2, 0))
+    version_label.pack(anchor="w", pady=(2, 0))
 
-    # ==================== 开发者信息 ====================
-    def open_github(event=None):
-        """打开GitHub主页"""
-        webbrowser.open("https://github.com/FADEDTUMI/PartyFish/")
-
-    dev_frame = ttkb.Frame(status_frame)
-    dev_frame.pack(pady=(3, 0))
+    # 右侧内容 - 使用pack布局
+    right_status_frame = ttkb.Frame(status_content_frame)
+    right_status_frame.pack(side=RIGHT, fill=Y, padx=(80, 0))
 
     dev_label = ttkb.Label(
-        dev_frame,
+        right_status_frame,
         text="by ",
-        bootstyle="light"
+        bootstyle="light",
+        font=("Segoe UI", 9, "bold")
     )
-    dev_label.pack(side=LEFT)
+    dev_label.pack(side=LEFT, padx=(0, 2))
 
     # 可点击的开发者链接
     dev_link = ttkb.Label(
-        dev_frame,
-        text="FadedTUMI/PeiXiaoXiao",
-        bootstyle="info",
-        cursor="hand2"
+        right_status_frame,
+        text="开发者",
+        bootstyle="light",
+        cursor="hand2",
+        font=("Segoe UI", 9, "bold")
     )
     dev_link.pack(side=LEFT)
-    dev_link.bind("<Button-1>", open_github)
+    
+    # 开发者窗口引用，用于跟踪窗口是否已存在
+    dev_window_instance = None
+    
+    # 开发者信息窗口函数
+    def show_developers_window(event=None):
+        """显示开发者信息窗口"""
+        nonlocal dev_window_instance
+        
+        # 如果窗口已存在，激活它并返回
+        if dev_window_instance and dev_window_instance.winfo_exists():
+            dev_window_instance.lift()
+            dev_window_instance.focus_force()
+            return
+        
+        # 先定义open_github函数
+        def open_github():
+            """打开GitHub主页"""
+            webbrowser.open("https://github.com/FADEDTUMI/PartyFish/")
+        
+        dev_window = tk.Toplevel(root)
+        dev_window.title("开发者信息")
+        dev_window.geometry("400x200")
+        dev_window.resizable(False, False)
+        
+        # 设置窗口图标（如果有）
+        if hasattr(root, 'icon'):
+            dev_window.iconphoto(False, root.icon)
+        
+        # 保存窗口实例
+        dev_window_instance = dev_window
+        
+        # 窗口关闭时重置实例
+        def on_close():
+            nonlocal dev_window_instance
+            dev_window_instance = None
+            dev_window.destroy()
+        
+        dev_window.protocol("WM_DELETE_WINDOW", on_close)
+        
+        # 创建内容框架
+        content_frame = ttkb.Frame(dev_window, padding="20")
+        content_frame.pack(fill=BOTH, expand=True)
+        
+        # 标题（可点击打开GitHub）
+        title_label = ttkb.Label(
+            content_frame,
+            text="PartyFish 开发者",
+            bootstyle="primary",
+            font=("Helvetica", 16, "bold"),
+            cursor="hand2"
+        )
+        title_label.pack(pady=(0, 20))
+        title_label.bind("<Button-1>", lambda e: open_github())
+        
+        # 开发者列表
+        developers = [
+            "FadedTUMI",
+            "XiaoXiao",
+            "MaiDong"
+        ]
+        
+        for dev in developers:
+            dev_label = ttkb.Label(
+                content_frame,
+                text=f"• {dev}",
+                bootstyle="light",
+                font=("Helvetica", 12)
+            )
+            dev_label.pack(pady=5, anchor="w")
+        
+        # GitHub 链接按钮
+        github_button = ttkb.Button(
+            content_frame,
+            text="访问 GitHub 仓库",
+            bootstyle="success-outline",
+            command=open_github
+        )
+        github_button.pack(pady=(20, 0))
+    
+    dev_link.bind("<Button-1>", show_developers_window)
 
     # 鼠标悬停效果
     def on_enter(event):
         dev_link.configure(bootstyle="primary")
 
     def on_leave(event):
-        dev_link.configure(bootstyle="info")
+        dev_link.configure(bootstyle="light")
 
     dev_link.bind("<Enter>", on_enter)
     dev_link.bind("<Leave>", on_leave)
@@ -2729,7 +3093,7 @@ def calculate_scale_factors():
     """
     计算缩放比例，考虑不同宽高比的情况
     游戏UI通常基于16:9设计，非16:9分辨率需要特殊处理
-    支持1080P(16:9)、2K(16:9)、4K(16:9)以及16:10等非标准分辨率
+    支持1080P(16:9)、2K(16:9)、4K(16:9)、16:10以及21:9等非标准分辨率
     """
     global SCALE_X, SCALE_Y, SCALE_UNIFORM
 
@@ -2743,16 +3107,33 @@ def calculate_scale_factors():
     SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
 
     # 对于模板匹配和UI元素定位，使用基于宽高比的统一缩放
-    # 16:10等非16:9分辨率需要特殊处理，确保UI元素正确定位
     # 游戏UI通常会保持水平居中，垂直方向调整位置
-    # 16:10的宽高比(1.6)比16:9(1.78)小，需要特殊处理
+    # 16:10(1.6)、21:9(2.33)等非16:9分辨率需要特殊处理
     # 使用基于高度的缩放，确保垂直方向元素正确显示
-    # 这样可以确保UI元素在各种分辨率下都能保持正确的垂直位置
+    # 这样可以确保UI元素在各种分辨率下都能保持正确的垂直位置和大小
     SCALE_UNIFORM = SCALE_Y
 
-    # 对于16:10等特殊宽高比，记录调试信息
+    # 对于特殊宽高比，记录调试信息
     if abs(target_aspect - base_aspect) > 0.05:
-        print(f"📐 [调试] 宽高比变化: 目标 {target_aspect:.2f} (约{int(target_aspect*100)/100:.2f}:1)，基准 {base_aspect:.2f} (16:9)，统一缩放 {SCALE_UNIFORM:.2f}")
+        aspect_ratio_str = f"{int(target_aspect*100)/100:.2f}:1"
+        if abs(target_aspect - 2.33) < 0.1:
+            aspect_ratio_str = "21:9"
+        elif abs(target_aspect - 1.6) < 0.1:
+            aspect_ratio_str = "16:10"
+        
+        # 使用调试系统记录宽高比变化信息
+        debug_info = {
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+            "action": "aspect_ratio_change",
+            "message": f"宽高比变化: 目标 {target_aspect:.2f} ({aspect_ratio_str})，基准 {base_aspect:.2f} (16:9)，统一缩放 {SCALE_UNIFORM:.2f}",
+            "data": {
+                "target_aspect": target_aspect,
+                "aspect_ratio_str": aspect_ratio_str,
+                "base_aspect": base_aspect,
+                "scale_uniform": SCALE_UNIFORM
+            }
+        }
+        add_debug_info(debug_info)
 
     return SCALE_X, SCALE_Y, SCALE_UNIFORM
 
@@ -2775,11 +3156,11 @@ def scale_point(x, y):
 
 def scale_point_center_anchored(x, y):
     """使用中心锚定方式缩放单点坐标（适用于居中UI元素如加时按钮）"""
-    scale = SCALE_UNIFORM
+    # 分别使用X和Y方向的缩放比例，确保不同宽高比下坐标准确
     center_offset_x = x - BASE_WIDTH / 2
     center_offset_y = y - BASE_HEIGHT / 2
-    return (int(TARGET_WIDTH / 2 + center_offset_x * scale),
-            int(TARGET_HEIGHT / 2 + center_offset_y * scale))
+    return (int(TARGET_WIDTH / 2 + center_offset_x * SCALE_X),
+            int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_Y))
 
 def scale_corner_anchored(base_x, base_y, base_w, base_h, anchor="bottom_right"):
     """
@@ -2823,6 +3204,66 @@ def scale_coords_bottom_anchored(base_x, base_y, base_w, base_h):
     new_h = int(base_h * scale)
     return (new_x, new_y, new_w, new_h)
 
+def scale_coords_center_anchored(base_x, base_y, base_w, base_h):
+    """
+    使用中心锚定方式缩放区域坐标（适用于居中UI元素如加时检测区域）
+    """
+    # 分别使用X和Y方向的缩放比例，确保不同宽高比下坐标准确
+    center_offset_x = base_x - BASE_WIDTH / 2
+    center_offset_y = base_y - BASE_HEIGHT / 2
+    new_x = int(TARGET_WIDTH / 2 + center_offset_x * SCALE_X)
+    new_y = int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_Y)
+    new_w = int(base_w * SCALE_X)
+    new_h = int(base_h * SCALE_Y)
+    return (new_x, new_y, new_w, new_h)
+
+# =========================
+# 加时功能专用缩放函数
+# =========================
+def jiashi_scale_point(x, y):
+    """加时功能专用的单点缩放函数"""
+    # 计算加时专用的缩放比例
+    # 基于2560×1440为基准，根据当前分辨率计算独立的缩放比例
+    jiashi_scale_x = TARGET_WIDTH / 2560
+    jiashi_scale_y = TARGET_HEIGHT / 1440
+    return (int(x * jiashi_scale_x), int(y * jiashi_scale_y))
+
+def jiashi_scale_region(x, y, w, h):
+    """加时功能专用的区域缩放函数"""
+    # 计算加时专用的缩放比例
+    jiashi_scale_x = TARGET_WIDTH / 2560
+    jiashi_scale_y = TARGET_HEIGHT / 1440
+    return (int(x * jiashi_scale_x), int(y * jiashi_scale_y), 
+            int(w * jiashi_scale_x), int(h * jiashi_scale_y))
+
+def jiashi_scale_point_center_anchored(x, y):
+    """加时功能专用的中心锚定单点缩放函数"""
+    # 计算加时专用的缩放比例
+    jiashi_scale_x = TARGET_WIDTH / 2560
+    jiashi_scale_y = TARGET_HEIGHT / 1440
+    
+    # 中心锚定计算
+    center_offset_x = x - 2560 / 2
+    center_offset_y = y - 1440 / 2
+    
+    return (int(TARGET_WIDTH / 2 + center_offset_x * jiashi_scale_x),
+            int(TARGET_HEIGHT / 2 + center_offset_y * jiashi_scale_y))
+
+def jiashi_scale_coords_center_anchored(x, y, w, h):
+    """加时功能专用的中心锚定区域缩放函数"""
+    # 计算加时专用的缩放比例
+    jiashi_scale_x = TARGET_WIDTH / 2560
+    jiashi_scale_y = TARGET_HEIGHT / 1440
+    
+    # 中心锚定计算
+    center_offset_x = x - 2560 / 2
+    center_offset_y = y - 1440 / 2
+    
+    return (int(TARGET_WIDTH / 2 + center_offset_x * jiashi_scale_x),
+            int(TARGET_HEIGHT / 2 + center_offset_y * jiashi_scale_y),
+            int(w * jiashi_scale_x),
+            int(h * jiashi_scale_y))
+
 def scale_coords_top_center(base_x, base_y, base_w, base_h):
     """
     缩放锚定在顶部中央的UI元素坐标（如钓鱼星星）
@@ -2838,8 +3279,12 @@ def scale_coords_top_center(base_x, base_y, base_w, base_h):
     return (new_x, new_y, new_w, new_h)
 
 def update_region_coords():
-    """根据当前缩放比例更新所有区域坐标"""
-    global region3_coords, region4_coords, region5_coords, region6_coords
+    """
+    根据当前缩放比例更新所有区域坐标
+    """
+    global region3_coords, region4_coords, region5_coords, region6_coords, jiashi_region_coords, btn_no_jiashi_coords, btn_yes_jiashi_coords
+    # 先计算最新的缩放比例，确保适配当前分辨率
+    calculate_scale_factors()
     # 上鱼星星 - 顶部中央区域
     region3_coords = scale_coords_top_center(1172, 165, 34, 34)
     # F1位置 - 底部中央区域
@@ -2848,6 +3293,11 @@ def update_region_coords():
     region5_coords = scale_coords_bottom_anchored(1212, 1329, 10, 19)
     # 上鱼右键 - 底部中央区域
     region6_coords = scale_coords_bottom_anchored(1146, 1316, 17, 21)
+    # 加时界面检测区域 - 使用加时专用的中心锚定缩放
+    jiashi_region_coords = jiashi_scale_coords_center_anchored(*JIASHI_REGION_BASE)
+    # 加时按钮坐标 - 使用加时专用的中心锚定缩放
+    btn_no_jiashi_coords = jiashi_scale_point_center_anchored(*BTN_NO_JIASHI_BASE)
+    btn_yes_jiashi_coords = jiashi_scale_point_center_anchored(*BTN_YES_JIASHI_BASE)
     # 当坐标更新时，检查是否需要重新加载模板
     reload_templates_if_scale_changed()
 
@@ -3378,10 +3828,13 @@ def record_caught_fish():
                     }
                     add_debug_info(debug_info)
                 
-                # 使用mss截取全屏
+                # 使用mss截取主显示器全屏
                 with mss.mss() as sct:
-                    # 获取主显示器的尺寸
-                    monitor = sct.monitors[1]  # 1 表示主显示器
+                    # 明确指定使用主显示器（索引1）
+                    monitor = sct.monitors[1]  # 1 表示主显示器，0表示所有显示器组合
+                    print(f"📌 [调试] 当前显示器配置: {len(sct.monitors)}个显示器，使用主显示器: {monitor}")
+                    
+                    # 强制使用主显示器进行截屏
                     screenshot = sct.grab(monitor)
                     
                     # 创建截图保存目录
@@ -3395,7 +3848,7 @@ def record_caught_fish():
                     
                     # 保存截图
                     mss.tools.to_png(screenshot.rgb, screenshot.size, output=screenshot_path)
-                    print(f"📸 [截屏] 传说鱼已自动保存: {screenshot_path}")
+                    print(f"📸 [截屏] 传说鱼已自动保存到主显示器截图: {screenshot_path}")
                     
                     # 调试信息：记录传说鱼截屏成功
                     if debug_mode:
@@ -3403,7 +3856,8 @@ def record_caught_fish():
                             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                             "action": "fish_record_screenshot_success",
                             "message": "传说鱼自动截屏成功",
-                            "screenshot_path": screenshot_path
+                            "screenshot_path": screenshot_path,
+                            "monitor_info": monitor
                         }
                         add_debug_info(debug_info)
             except Exception as e:
@@ -3494,19 +3948,23 @@ def search_fish_records(keyword="", quality_filter="全部", use_session=True):
 
         return filtered
 # 定义区域的坐标 (x, y, w, h) - 基于2K分辨率的基准值
-# 使用 scale_coords 函数自动缩放
-region3_coords = scale_coords(1172, 165, 34, 34)    #上鱼星星
-region4_coords = scale_coords(1100, 1329, 10, 19)   #F1位置
-region5_coords = scale_coords(1212, 1329, 10, 19)   #F2位置
-region6_coords = scale_coords(1146, 1316, 17, 21)   #上鱼右键
+# 使用与update_region_coords函数相同的缩放方式，确保与模板缩放一致
+region3_coords = scale_coords_top_center(1172, 165, 34, 34)    #上鱼星星
+region4_coords = scale_coords_bottom_anchored(1100, 1329, 10, 19)   #F1位置
+region5_coords = scale_coords_bottom_anchored(1212, 1329, 10, 19)   #F2位置
+region6_coords = scale_coords_bottom_anchored(1146, 1316, 17, 21)   #上鱼右键
 
 # 鱼饵数量区域（基准值）
 BAIT_REGION_BASE = (2318, 1296, 2348, 1318)
 # 加时界面检测区域（基准值）
-JIASHI_REGION_BASE = (1245, 675, 26, 27)
+JIASHI_REGION_BASE = (1244, 676, 27, 28)
 # 点击按钮位置（基准值）
-BTN_NO_JIASHI_BASE = (1182, 776)   # 不加时按钮
-BTN_YES_JIASHI_BASE = (1398, 776)  # 加时按钮
+BTN_NO_JIASHI_BASE = (1175, 778)   # 不加时按钮
+BTN_YES_JIASHI_BASE = (1390, 778)  # 加时按钮
+# 加时相关坐标缓存（用于分辨率变化时自动更新）
+jiashi_region_coords = None  # 加时检测区域
+btn_no_jiashi_coords = None  # 不加时按钮
+btn_yes_jiashi_coords = None  # 加时按钮
 previous_result = None  # 上次识别的结果
 current_result = 0  # 当前识别的数字
 # 模板加载一次
@@ -3535,7 +3993,58 @@ def get_current_screen_resolution():
     返回: (width, height) 元组
     """
     try:
-        # 获取主显示器的分辨率
+        # 尝试使用EnumDisplaySettings获取实际物理分辨率（不受DPI缩放影响）
+        # 定义DEVMODE结构体
+        class DEVMODE(ctypes.Structure):
+            _fields_ = [
+                ("dmDeviceName", ctypes.c_wchar * 32),
+                ("dmSpecVersion", ctypes.c_short),
+                ("dmDriverVersion", ctypes.c_short),
+                ("dmSize", ctypes.c_short),
+                ("dmDriverExtra", ctypes.c_short),
+                ("dmFields", ctypes.c_ulong),
+                ("dmOrientation", ctypes.c_short),
+                ("dmPaperSize", ctypes.c_short),
+                ("dmPaperLength", ctypes.c_short),
+                ("dmPaperWidth", ctypes.c_short),
+                ("dmScale", ctypes.c_short),
+                ("dmCopies", ctypes.c_short),
+                ("dmDefaultSource", ctypes.c_short),
+                ("dmPrintQuality", ctypes.c_short),
+                ("dmColor", ctypes.c_short),
+                ("dmDuplex", ctypes.c_short),
+                ("dmYResolution", ctypes.c_short),
+                ("dmTTOption", ctypes.c_short),
+                ("dmCollate", ctypes.c_short),
+                ("dmFormName", ctypes.c_wchar * 32),
+                ("dmLogPixels", ctypes.c_short),
+                ("dmBitsPerPel", ctypes.c_ulong),
+                ("dmPelsWidth", ctypes.c_ulong),
+                ("dmPelsHeight", ctypes.c_ulong),
+                ("dmDisplayFlags", ctypes.c_ulong),
+                ("dmDisplayFrequency", ctypes.c_ulong),
+                ("dmICMMethod", ctypes.c_ulong),
+                ("dmICMIntent", ctypes.c_ulong),
+                ("dmMediaType", ctypes.c_ulong),
+                ("dmDitherType", ctypes.c_ulong),
+                ("dmReserved1", ctypes.c_ulong),
+                ("dmReserved2", ctypes.c_ulong),
+                ("dmPanningWidth", ctypes.c_ulong),
+                ("dmPanningHeight", ctypes.c_ulong)
+            ]
+        
+        # 创建DEVMODE实例
+        devmode = DEVMODE()
+        devmode.dmSize = ctypes.sizeof(DEVMODE)
+        
+        # 获取当前显示设置
+        if user32.EnumDisplaySettingsW(None, -1, ctypes.byref(devmode)):
+            # 使用实际物理分辨率
+            actual_width = devmode.dmPelsWidth
+            actual_height = devmode.dmPelsHeight
+            return actual_width, actual_height
+        
+        # 备选方案：使用GetSystemMetrics
         width = user32.GetSystemMetrics(0)  # SM_CXSCREEN = 0
         height = user32.GetSystemMetrics(1)  # SM_CYSCREEN = 1
         return width, height
@@ -3543,18 +4052,12 @@ def get_current_screen_resolution():
         print(f"❌ [错误] 获取屏幕分辨率失败: {e}")
         return TARGET_WIDTH, TARGET_HEIGHT
 
-# 获取当前系统分辨率
-CURRENT_SCREEN_WIDTH, CURRENT_SCREEN_HEIGHT = get_current_screen_resolution()
+# 注意：CURRENT_SCREEN_WIDTH 和 CURRENT_SCREEN_HEIGHT 会在 load_parameters() 函数中被正确初始化
+# 这里不再提前初始化，避免DPI缩放影响
 
-# 如果分辨率选择为"current"，则更新目标分辨率为当前系统分辨率
-if resolution_choice == "current":
-    TARGET_WIDTH = CURRENT_SCREEN_WIDTH
-    TARGET_HEIGHT = CURRENT_SCREEN_HEIGHT
-    # 重新计算缩放比例
-    SCALE_X = TARGET_WIDTH / BASE_WIDTH
-    SCALE_Y = TARGET_HEIGHT / BASE_HEIGHT
-    # 计算统一缩放比例
-    calculate_scale_factors()
+# 分辨率初始值，会在 load_parameters() 中被覆盖
+CURRENT_SCREEN_WIDTH = TARGET_WIDTH
+CURRENT_SCREEN_HEIGHT = TARGET_HEIGHT
 
 # 当前按下的修饰键状态
 current_modifiers = set()
@@ -3699,12 +4202,14 @@ def reload_templates_if_scale_changed():
     global templates, star_template, f1, f2, shangyule, jiashi
     global _cached_scale_x, _cached_scale_y
 
-    if _cached_scale_x != SCALE_X or _cached_scale_y != SCALE_Y:
+    # 只有当缓存的缩放比例存在且发生变化时，才重新加载模板
+    if (_cached_scale_x is not None and _cached_scale_y is not None) and \
+       (_cached_scale_x != SCALE_X or _cached_scale_y != SCALE_Y):
         # 缩放比例变化，需要重新加载所有模板
         _cached_scale_x = SCALE_X
         _cached_scale_y = SCALE_Y
         print(f"🔄 [模板] 分辨率变化，重新加载模板 (缩放: X={SCALE_X:.2f}, Y={SCALE_Y:.2f})")
-
+        
         # 重新加载所有模板（强制重新加载）
         try:
             # 使用统一缩放比例避免模板变形
@@ -3747,6 +4252,10 @@ def reload_templates_if_scale_changed():
             print(f"✅ [模板] 所有模板重新加载完成，共 {len(templates)} 个数字模板 (统一缩放: {scale:.2f})")
         except Exception as e:
             print(f"❌ [错误] 重新加载模板失败: {e}")
+    elif _cached_scale_x is None and _cached_scale_y is None:
+        # 第一次运行，初始化缓存
+        _cached_scale_x = SCALE_X
+        _cached_scale_y = SCALE_Y
 
 # 加载模板（0.png到9.png）
 def load_templates():
@@ -3814,11 +4323,56 @@ def load_jiashi():
 # =========================
 mouse_lock = threading.Lock()
 mouse_is_down = False
+def handle_jiashi_in_action(scr):
+    """
+    在动作执行过程中处理加时，返回是否检测到并处理了加时
+    """
+    # 处理加时选择（使用锁保护读取jiashi_var）
+    with param_lock:
+        current_jiashi = jiashi_var
+
+    if current_jiashi == 0:
+        if fangzhu_jiashi(scr):
+            btn_x, btn_y = scale_point_center_anchored(*BTN_NO_JIASHI_BASE)
+            user32.SetCursorPos(btn_x, btn_y)
+            time.sleep(0.05)
+            user32.mouse_event(0x02, 0, 0, 0, 0)
+            time.sleep(0.1)
+            user32.mouse_event(0x04, 0, 0, 0, 0)
+            time.sleep(0.05)
+            if bait_math_val(scr):
+                with param_lock:
+                    previous_result = result_val_is
+            return True
+    elif current_jiashi == 1:
+        if fangzhu_jiashi(scr):
+            btn_x, btn_y = scale_point_center_anchored(*BTN_YES_JIASHI_BASE)
+            user32.SetCursorPos(btn_x, btn_y)
+            time.sleep(0.05)
+            user32.mouse_event(0x02, 0, 0, 0, 0)
+            time.sleep(0.1)
+            user32.mouse_event(0x04, 0, 0, 0, 0)
+            time.sleep(0.05)
+            if bait_math_val(scr):
+                with param_lock:
+                    previous_result = result_val_is
+            return True
+    return False
+
 def pressandreleasemousebutton():
+    # 先检查是否需要处理加时
+    with mss.mss() as temp_scr:
+        if handle_jiashi_in_action(temp_scr):
+            return
+    
     user32.mouse_event(0x02, 0, 0, 0, 0)
-    time.sleep(leftclickdown)
+    jittered_down = add_jitter(leftclickdown)
+    time.sleep(jittered_down)
+    print_timing_info("收线", leftclickdown, jittered_down)
     user32.mouse_event(0x04, 0, 0, 0, 0)
-    time.sleep(leftclickup)
+    jittered_up = add_jitter(leftclickup)
+    time.sleep(jittered_up)
+    print_timing_info("放线", leftclickup, jittered_up)
 
 def ensure_mouse_down():
     global mouse_is_down
@@ -4040,12 +4594,16 @@ def match_digit_template(image):
         return None
     best_match = None  # 最佳匹配信息
     best_val = 0  # 存储最佳匹配度
+    h, w = image.shape[:2]  # 获取图像尺寸
     for i, template in enumerate(templates):
-        res = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-        if max_val> 0.8 and max_val > best_val:  # 找到最佳匹配
-            best_val = max_val
-            best_match = (i, max_loc)  # 记录最佳匹配的数字和位置
+        t_h, t_w = template.shape[:2]  # 获取模板尺寸
+        # 安全检查：确保图像尺寸大于等于模板尺寸
+        if h >= t_h and w >= t_w:
+            res = cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED)
+            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+            if max_val> 0.8 and max_val > best_val:  # 找到最佳匹配
+                best_val = max_val
+                best_match = (i, max_loc)  # 记录最佳匹配的数字和位置
     return best_match
 
 def capture_region(x, y, w, h, scr):
@@ -4068,7 +4626,11 @@ def fished(scr):
     if region_gray is None:
         return None
     # 执行模板匹配并检查最大匹配度是否大于 0.8
-    return cv2.minMaxLoc(cv2.matchTemplate(region_gray, star_template, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    h, w = region_gray.shape[:2]
+    t_h, t_w = star_template.shape[:2]
+    if h >= t_h and w >= t_w:
+        return cv2.minMaxLoc(cv2.matchTemplate(region_gray, star_template, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    return False
 def f1_mached(scr):
     global region4_coords, f1
     # 确保模板已加载
@@ -4077,7 +4639,11 @@ def f1_mached(scr):
     region_gray = capture_region(*region4_coords, scr)
     if region_gray is None:
         return None
-    return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f1, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    h, w = region_gray.shape[:2]
+    t_h, t_w = f1.shape[:2]
+    if h >= t_h and w >= t_w:
+        return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f1, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    return False
 def f2_mached(scr):
     global region5_coords, f2
     # 确保模板已加载
@@ -4086,7 +4652,11 @@ def f2_mached(scr):
     region_gray = capture_region(*region5_coords, scr)
     if region_gray is None:
         return None
-    return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f2, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    h, w = region_gray.shape[:2]
+    t_h, t_w = f2.shape[:2]
+    if h >= t_h and w >= t_w:
+        return cv2.minMaxLoc(cv2.matchTemplate(region_gray, f2, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    return False
 def shangyu_mached(scr):
     global region6_coords, shangyule
     # 确保模板已加载
@@ -4095,7 +4665,11 @@ def shangyu_mached(scr):
     region_gray = capture_region(*region6_coords, scr)
     if region_gray is None:
         return None
-    return cv2.minMaxLoc(cv2.matchTemplate(region_gray, shangyule, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    h, w = region_gray.shape[:2]
+    t_h, t_w = shangyule.shape[:2]
+    if h >= t_h and w >= t_w:
+        return cv2.minMaxLoc(cv2.matchTemplate(region_gray, shangyule, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    return False
 def fangzhu_jiashi(scr):
     global jiashi
     # 记录日志：开始加时识别
@@ -4107,17 +4681,16 @@ def fangzhu_jiashi(scr):
         }
         add_debug_info(debug_info)
     
-    # 每次都重新加载模板，确保适配当前分辨率
-    load_jiashi()
-    x, y, w, h = JIASHI_REGION_BASE
-    # 加时界面在屏幕中央，使用中心锚定方式
-    scale = SCALE_UNIFORM
-    center_offset_x = x - BASE_WIDTH / 2
-    center_offset_y = y - BASE_HEIGHT / 2
-    actual_x = int(TARGET_WIDTH / 2 + center_offset_x * scale)
-    actual_y = int(TARGET_HEIGHT / 2 + center_offset_y * scale)
-    actual_w = int(w * scale)
-    actual_h = int(h * scale)
+    # 确保模板已加载
+    if jiashi is None:
+        load_jiashi()
+    
+    # 确保加时区域坐标已初始化
+    if jiashi_region_coords is None:
+        update_region_coords()
+    
+    # 使用缓存的坐标
+    actual_x, actual_y, actual_w, actual_h = jiashi_region_coords
     
     # 记录日志：识别区域
     if debug_mode:
@@ -4146,7 +4719,13 @@ def fangzhu_jiashi(scr):
             add_debug_info(debug_info)
         return None
     
-    result = cv2.minMaxLoc(cv2.matchTemplate(region_gray, jiashi, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    # 安全检查：确保图像尺寸大于等于模板尺寸
+    h, w = region_gray.shape[:2]
+    t_h, t_w = jiashi.shape[:2]
+    if h >= t_h and w >= t_w:
+        result = cv2.minMaxLoc(cv2.matchTemplate(region_gray, jiashi, cv2.TM_CCOEFF_NORMED))[1] > 0.8
+    else:
+        result = False
     
     # 记录日志：识别结果
     if debug_mode:
@@ -4282,7 +4861,10 @@ def handle_jiashi_thread():
 
                     if current_jiashi == 0:
                         if fangzhu_jiashi(scr):
-                            btn_x, btn_y = scale_point_center_anchored(*BTN_NO_JIASHI_BASE)
+                            # 确保按钮坐标已初始化
+                            if btn_no_jiashi_coords is None:
+                                update_region_coords()
+                            btn_x, btn_y = btn_no_jiashi_coords
                             user32.SetCursorPos(btn_x, btn_y)
                             time.sleep(0.05)
                             user32.mouse_event(0x02, 0, 0, 0, 0)
@@ -4294,7 +4876,10 @@ def handle_jiashi_thread():
                                     previous_result = result_val_is
                     elif current_jiashi == 1:
                         if fangzhu_jiashi(scr):
-                            btn_x, btn_y = scale_point_center_anchored(*BTN_YES_JIASHI_BASE)
+                            # 确保按钮坐标已初始化
+                            if btn_yes_jiashi_coords is None:
+                                update_region_coords()
+                            btn_x, btn_y = btn_yes_jiashi_coords
                             user32.SetCursorPos(btn_x, btn_y)
                             time.sleep(0.05)
                             user32.mouse_event(0x02, 0, 0, 0, 0)
@@ -4330,15 +4915,23 @@ def main():
             try:
                 scr = mss.mss()
 
+                # 先检查是否需要处理加时
+                if handle_jiashi_in_action(scr):
+                    continue
+                
                 # 检测F1/F2抛竿
                 if f1_mached(scr):
                     user32.mouse_event(0x02, 0, 0, 0, 0)
-                    time.sleep(paogantime)
+                    jittered_pao = add_jitter(paogantime)
+                    time.sleep(jittered_pao)
+                    print_timing_info("抛竿", paogantime, jittered_pao)
                     user32.mouse_event(0x04, 0, 0, 0, 0)
                     time.sleep(0.15)
                 elif f2_mached(scr):
                     user32.mouse_event(0x02, 0, 0, 0, 0)
-                    time.sleep(paogantime)
+                    jittered_pao = add_jitter(paogantime)
+                    time.sleep(jittered_pao)
+                    print_timing_info("抛竿", paogantime, jittered_pao)
                     user32.mouse_event(0x04, 0, 0, 0, 0)
                     time.sleep(0.15)
                 elif shangyu_mached(scr):
@@ -4408,12 +5001,13 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v2.8.beta-3             ║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v.2.9-beta-2".ljust(44)+"║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
-    print(f"║  ⌨️ 快捷键: {hotkey_name}启动/暂停脚本".ljust(42)+"║")
-    print("║  🔧 开发者: FadedTUMI/PeiXiaoXiao                ║")
+    print(f"║  ⌨️ 快捷键: {hotkey_name}启动/暂停脚本".ljust(43)+"║")
+    print(f"║  🎲 时间抖动: ±{JITTER_RANGE}%".ljust(46)+"║")
+    print("║  🔧 开发者: FadedTUMI/PeiXiaoXiao/MaiDong".ljust(47)+"║")
     print("╚" + "═" * 50 + "╝")
     print()
 
