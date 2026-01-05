@@ -65,6 +65,62 @@ def add_debug_info(info):
             debug_info_history.pop(0)  # 移除最旧的记录
 
 # =========================
+# 运行日志系统
+# =========================
+# 运行日志队列，用于存储所有控制台输出信息
+log_queue = queue.Queue(maxsize=1000)
+log_history = []  # 日志历史记录
+log_history_max = 500  # 最大保存500条日志
+log_history_lock = threading.Lock()  # 保护日志历史记录的线程锁
+
+# 重定向标准输出到日志系统
+import sys
+import io
+
+class LogRedirector:
+    """重定向标准输出到日志系统"""
+    def __init__(self, original_stream):
+        self.original_stream = original_stream
+        self.buffer = io.StringIO()
+        
+    def write(self, text):
+        # 写入到原始流
+        self.original_stream.write(text)
+        # 如果文本不为空，添加到日志队列
+        if text.strip():
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            log_entry = f"[{timestamp}] {text.rstrip()}"
+            
+            # 添加到队列
+            try:
+                log_queue.put_nowait(log_entry)
+            except queue.Full:
+                # 队列满时移除最旧的条目
+                try:
+                    log_queue.get_nowait()
+                    log_queue.put_nowait(log_entry)
+                except:
+                    pass
+            
+            # 添加到历史记录
+            with log_history_lock:
+                log_history.append(log_entry)
+                # 保持历史记录不超过最大限制
+                if len(log_history) > log_history_max:
+                    log_history.pop(0)
+        
+        # 写入到缓冲区（如果需要）
+        self.buffer.write(text)
+        
+    def flush(self):
+        self.original_stream.flush()
+        self.buffer.flush()
+
+# 重定向标准输出和标准错误
+sys.stdout = LogRedirector(sys.stdout)
+sys.stderr = LogRedirector(sys.stderr)
+
+# =========================
 # 线程锁 - 保护共享变量
 # =========================
 param_lock = threading.Lock()  # 参数读写锁
@@ -78,7 +134,7 @@ legendary_screenshot_enabled = True # 默认关闭传说/传奇鱼自动截屏
 # =========================
 # 字体大小设置
 # =========================
-font_size = 100  # 默认字体大小为100%
+font_size = 100  # 默认字体大小
 preset_btns = []  # 保存预设按钮引用，用于后续字体更新
 input_entries = []  # 保存所有输入框引用，用于后续字体更新
 combo_boxes = []  # 保存所有组合框引用，用于后续字体更新
@@ -257,6 +313,7 @@ def init_font_styles(style, font_size_percent):
         "Small": int(7 * scale_factor),  # 小号字体大小
         "Stats": int(10 * scale_factor),  # 统计信息字体大小
         "StatsTotal": int(11 * scale_factor),  # 总计统计字体大小
+        "LogText": int(8 * scale_factor),  # 日志文本字体大小
     }
     
     # 确保字体大小在合理范围内
@@ -387,6 +444,10 @@ def init_font_styles(style, font_size_percent):
             for template in bootstyle_templates:
                 style_name = template.format(color.lower())
                 style.configure(style_name, font=button_font)
+        
+        # 9. 更新日志文本样式
+        log_font = (base_font, font_sizes["LogText"])
+        style.configure("LogText.TText", font=log_font)
     except Exception as e:
         print(f"Error initializing font styles: {e}")
 
@@ -417,6 +478,7 @@ def update_all_widget_fonts(widget, style, font_size_percent):
         "Radiobutton": 9,
         "Checkbutton": 9,
         "Treeview": 9,
+        "LogText": 8,
     }
     
     # 递归更新所有控件的字体
@@ -439,6 +501,8 @@ def update_all_widget_fonts(widget, style, font_size_percent):
                 default_size = default_sizes["Checkbutton"]
             elif widget_type in ["Treeview", "TTKTreeview"] or "Treeview" in widget_type:
                 default_size = default_sizes["Treeview"]
+            elif widget_type in ["Text", "TKText", "TTKText"] or "Text" in widget_type:
+                default_size = default_sizes["LogText"]
             elif widget_type in ["Frame", "TFrame", "TTKFrame"] or "Frame" in widget_type:
                 # 跳过框架，只处理其内部控件
                 pass
@@ -466,6 +530,8 @@ def update_all_widget_fonts(widget, style, font_size_percent):
                 if widget_type == "Label" and ("PartyFish" in str(w.cget("text")) or "标题" in str(w.cget("text"))):
                     new_font = (base_font, int(14 * scale_factor), "bold")
                 elif widget_type == "Label" and "统计" in str(w.cget("text")):
+                    new_font = (base_font, int(10 * scale_factor), "bold")
+                elif widget_type == "Label" and "运行日志" in str(w.cget("text")):
                     new_font = (base_font, int(10 * scale_factor), "bold")
             except:
                 pass
@@ -1175,6 +1241,86 @@ def show_debug_window():
     return debug_window
 
 # =========================
+# 运行日志界面功能
+# =========================
+def update_log_display(log_text_widget, auto_scroll=True):
+    """更新运行日志显示"""
+    # 从队列中获取所有新的日志条目
+    log_entries = []
+    while not log_queue.empty():
+        try:
+            log_entries.append(log_queue.get_nowait())
+        except queue.Empty:
+            break
+    
+    # 如果有新的日志条目，添加到文本框中
+    if log_entries:
+        # 保存当前滚动位置
+        scroll_position = log_text_widget.yview()
+        
+        # 启用文本框编辑
+        log_text_widget.config(state="normal")
+        
+        # 添加新的日志条目
+        for entry in log_entries:
+            # 根据日志类型添加不同的颜色标记
+            # 注意：先检查具体的类型，最后检查一般类型
+            if "❌" in entry and ("[错误]" in entry or "错误" in entry):
+                log_text_widget.insert("end", entry + "\n", "error")
+            elif "⚠️" in entry and ("[警告]" in entry or "警告" in entry):
+                log_text_widget.insert("end", entry + "\n", "warning")
+            elif "💾" in entry or ("[保存]" in entry and "❌" not in entry):  # 排除包含❌的保存信息
+                log_text_widget.insert("end", entry + "\n", "save")
+            elif "✅" in entry or "[初始化]" in entry:
+                log_text_widget.insert("end", entry + "\n", "init")
+            elif "▶️" in entry or "⏸️" in entry or "[状态]" in entry:
+                log_text_widget.insert("end", entry + "\n", "status")
+            elif "🐟" in entry or "[钓到]" in entry:
+                log_text_widget.insert("end", entry + "\n", "fish")
+            elif "🖼️" in entry or "[模板]" in entry:
+                log_text_widget.insert("end", entry + "\n", "template")
+            elif "⏱️" in entry or "[时间]" in entry:
+                log_text_widget.insert("end", entry + "\n", "time")
+            elif "📸" in entry or "[截屏]" in entry:
+                log_text_widget.insert("end", entry + "\n", "screenshot")
+            elif "🎣" in entry or "[提示]" in entry:
+                log_text_widget.insert("end", entry + "\n", "hint")
+            elif "📌" in entry or "[调试]" in entry:
+                log_text_widget.insert("end", entry + "\n", "debug")
+            elif "📊" in entry or "[会话]" in entry:
+                log_text_widget.insert("end", entry + "\n", "session")
+            elif "🔍" in entry or "[OCR]" in entry:
+                log_text_widget.insert("end", entry + "\n", "ocr")
+            elif "📄" in entry or "[信息]" in entry:
+                log_text_widget.insert("end", entry + "\n", "info")
+            elif "❌" in entry:  # 单独的❌匹配，放在最后
+                log_text_widget.insert("end", entry + "\n", "error")
+            elif "⚠️" in entry:  # 单独的⚠️匹配，放在最后
+                log_text_widget.insert("end", entry + "\n", "warning")
+            else:
+                log_text_widget.insert("end", entry + "\n")
+        
+        # 限制日志行数，防止内存过大
+        line_count = int(log_text_widget.index("end-1c").split(".")[0])
+        if line_count > 1000:
+            # 删除前500行
+            log_text_widget.delete("1.0", "500.0")
+        
+        # 如果开启了自动滚动，滚动到底部
+        if auto_scroll:
+            log_text_widget.see("end")
+        # 否则保持原来的滚动位置
+        elif scroll_position[1] < 1.0:  # 如果不是在底部
+            log_text_widget.yview_moveto(scroll_position[0])
+        
+        # 禁用文本框编辑（只读）
+        log_text_widget.config(state="disabled")
+        
+        # 恢复滚动位置
+        if scroll_position == 0:  # 如果之前就在顶部，保持在顶部
+            log_text_widget.yview_moveto(0)
+
+# =========================
 # 创建 Tkinter 窗口（现代化UI设计 - 左右分栏布局）
 # =========================
 def create_gui():
@@ -1184,9 +1330,9 @@ def create_gui():
     # 创建现代化主题窗口
     root = ttkb.Window(themename="darkly")  # 使用深色主题
     root.title("🎣 PartyFish 自动钓鱼助手")
-    root.geometry("1110x855")  # 增大初始高度，确保所有信息完整显示
-    root.minsize(840, 500)    # 调整最小尺寸，提供更好的初始体验
-    root.maxsize(2560, 1440)   # 调整最大尺寸，支持更大的显示器
+    root.geometry("1110x1000")  # 增大窗口高度，为运行日志留出空间
+    root.minsize(840, 650)    # 调整最小尺寸，确保运行日志区域可见
+    root.maxsize(2560, 1600)   # 调整最大尺寸，支持更大的显示器
     root.resizable(True, True)  # 允许调整大小
 
     # 设置窗口图标（如果有的话）
@@ -1204,45 +1350,44 @@ def create_gui():
     except:
         pass
     
-    # 响应式布局：窗口大小变化时调整钓鱼记录表格列宽
+    # 响应式布局：窗口大小变化时调整布局
     def on_window_resize(event):
-        """窗口大小变化时调整钓鱼记录表格列宽"""
-        if not fish_tree_ref:
-            return
+        """窗口大小变化时调整布局"""
+        # 调整钓鱼记录表格列宽
+        if fish_tree_ref:
+            # 获取当前主窗口宽度
+            window_width = root.winfo_width()
             
-        # 获取当前主窗口宽度
-        window_width = root.winfo_width()
-        
-        # 计算右侧面板的可用宽度（假设左侧面板宽度为250px，加上间距8px）
-        available_width = max(window_width - 200, 400)  # 最小400px
-        
-        # 调整比例，时间列与名称/重量列相同（时间:名称:品质:重量 = 63:63:36:63）
-        time_ratio = 63   # 时间列比例改为63，与名称/重量列一致
-        name_ratio = 63
-        quality_ratio = 36
-        weight_ratio = 63
-        total_ratio = time_ratio + name_ratio + quality_ratio + weight_ratio
-        
-        # 计算Treeview容器的可用宽度，完全跟随窗口变化
-        tree_container_width = available_width - 30  # 减去滚动条和边距
-        
-        # 严格按照比例计算各列宽度，真正实现响应式
-        time_width = int(tree_container_width * (time_ratio / total_ratio))
-        name_width = int(tree_container_width * (name_ratio / total_ratio))
-        quality_width = int(tree_container_width * (quality_ratio / total_ratio))
-        weight_width = int(tree_container_width - time_width - name_width - quality_width - 4)  # 减去4个像素的边框间距
-        
-        # 设置合理的最小宽度，确保内容能正常显示
-        time_width = max(time_width, 100)   # 时间列最小宽度
-        name_width = max(name_width, 60)    # 名称列最小宽度
-        quality_width = max(quality_width, 35)  # 品质列最小宽度
-        weight_width = max(weight_width, 60)   # 重量列最小宽度
-        
-        # 应用新列宽
-        fish_tree_ref.column("时间", width=time_width, anchor="center")
-        fish_tree_ref.column("名称", width=name_width, anchor="center")
-        fish_tree_ref.column("品质", width=quality_width, anchor="center")
-        fish_tree_ref.column("重量", width=weight_width, anchor="center")
+            # 计算右侧面板的可用宽度（假设左侧面板宽度为250px，加上间距8px）
+            available_width = max(window_width - 200, 400)  # 最小400px
+            
+            # 调整比例，时间列与名称/重量列相同（时间:名称:品质:重量 = 63:63:36:63）
+            time_ratio = 63   # 时间列比例改为63，与名称/重量列一致
+            name_ratio = 63
+            quality_ratio = 36
+            weight_ratio = 63
+            total_ratio = time_ratio + name_ratio + quality_ratio + weight_ratio
+            
+            # 计算Treeview容器的可用宽度，完全跟随窗口变化
+            tree_container_width = available_width - 30  # 减去滚动条和边距
+            
+            # 严格按照比例计算各列宽度，真正实现响应式
+            time_width = int(tree_container_width * (time_ratio / total_ratio))
+            name_width = int(tree_container_width * (name_ratio / total_ratio))
+            quality_width = int(tree_container_width * (quality_ratio / total_ratio))
+            weight_width = int(tree_container_width - time_width - name_width - quality_width - 4)  # 减去4个像素的边框间距
+            
+            # 设置合理的最小宽度，确保内容能正常显示
+            time_width = max(time_width, 100)   # 时间列最小宽度
+            name_width = max(name_width, 60)    # 名称列最小宽度
+            quality_width = max(quality_width, 35)  # 品质列最小宽度
+            weight_width = max(weight_width, 60)   # 重量列最小宽度
+            
+            # 应用新列宽
+            fish_tree_ref.column("时间", width=time_width, anchor="center")
+            fish_tree_ref.column("名称", width=name_width, anchor="center")
+            fish_tree_ref.column("品质", width=quality_width, anchor="center")
+            fish_tree_ref.column("重量", width=weight_width, anchor="center")
     
     # 绑定窗口大小变化事件
     root.bind("<Configure>", on_window_resize)
@@ -2348,6 +2493,15 @@ def create_gui():
                 print(f"调整Treeview列宽时出错: {e}")
                 # 处理可能的错误
                 pass
+        
+        # 更新运行日志文本字体
+        if 'log_text' in globals():
+            try:
+                log_text_size = max(5, min(30, int(8 * scale_factor)))
+                log_text_font = (base_font, log_text_size)
+                log_text.configure(font=log_text_font)
+            except Exception as e:
+                print(f"调整运行日志字体时出错: {e}")
 
     # ==================== 右侧面板（钓鱼记录区域） ====================
     right_panel = ttkb.Frame(main_frame)
@@ -2356,6 +2510,18 @@ def create_gui():
     # 配置右侧面板的行列权重，确保内部组件能正确扩展
     right_panel.columnconfigure(0, weight=1)  # 唯一列自适应宽度
     right_panel.rowconfigure(0, weight=1)  # 唯一行自适应高度
+
+    # 创建右侧面板的垂直分割
+    right_paned = tk.PanedWindow(right_panel, orient="vertical", sashwidth=6, sashrelief="raised", bg="#2d3748")
+    right_paned.pack(fill=BOTH, expand=YES)
+    
+    # 上半部分：钓鱼记录
+    fish_record_frame = ttkb.Frame(right_paned, padding=8)
+    right_paned.add(fish_record_frame, minsize=300)
+    
+    # 下半部分：运行日志
+    log_frame = ttkb.Frame(right_paned, padding=8)
+    right_paned.add(log_frame, minsize=200)
 
     # ==================== 钓鱼记录卡片 ====================
     # 先创建style对象
@@ -2366,7 +2532,7 @@ def create_gui():
     style.configure("OceanBlue.TLabelframe.Label", foreground="#1E90FF")
     
     fish_record_card = ttkb.Labelframe(
-        right_panel,
+        fish_record_frame,
         text=" 🐟 钓鱼记录 ",
         padding=12,
         bootstyle="primary"
@@ -2544,7 +2710,7 @@ def create_gui():
     divider.pack(fill=X, pady=10)
 
     # 记录列表容器（包含Treeview和滚动条）- 现代化设计
-    tree_container = ttkb.Frame(fish_record_card)
+    tree_container = ttkb.Frame(fish_record_card, borderwidth=1, relief="solid")
     tree_container.pack(fill=BOTH, expand=YES, pady=(0, 8))
 
     # 记录列表（使用Treeview）
@@ -2593,25 +2759,23 @@ def create_gui():
     # 配置品质颜色标签（背景色和前景色）- 优化配色方案
     # 标准-浅灰色, 非凡-清新绿, 稀有-海洋蓝, 史诗-优雅紫, 传说/传奇-尊贵金
     # 文字颜色统一为黑色，背景色使用更鲜艳的颜色
-    quality_colors = {
-        # 将标准和繁体标准合并为同一颜色配置
-        **{q: ("#FFFFFF", "#000000") for q in ["标准", "標準"]},
-        "非凡": ("#2ECC71", "#000000"),
-        "稀有": ("#1E90FF", "#FFFFFF"),
-        "史诗": ("#9B59B6", "#FFFFFF"),
-        # 将传说、傳說、传奇、傳奇合并为同一颜色配置
-        **{q: ("#F1C40F", "#000000") for q in ["传说", "傳說", "传奇", "傳奇"]}
-    }
-    
-    for quality, (bg, fg) in quality_colors.items():
-        fish_tree.tag_configure(quality, background=bg, foreground=fg)
-    
+    fish_tree.tag_configure("标准", background="#FFFFFF", foreground="#000000")
+    fish_tree.tag_configure("標準", background="#FFFFFF", foreground="#000000")  # 繁体标准
+    fish_tree.tag_configure("非凡", background="#2ECC71", foreground="#000000")
+    fish_tree.tag_configure("稀有", background="#1E90FF", foreground="#FFFFFF")
+    fish_tree.tag_configure("史诗", background="#9B59B6", foreground="#FFFFFF")
+    fish_tree.tag_configure("传说", background="#F1C40F", foreground="#000000")
+    fish_tree.tag_configure("傳說", background="#F1C40F", foreground="#000000")
+    fish_tree.tag_configure("传奇", background="#F1C40F", foreground="#000000")
+    fish_tree.tag_configure("傳奇", background="#F1C40F", foreground="#000000")  # 传奇与传说同色
+
     # 设置Treeview行高和字体 - 现代化设计
     # 移除background和fieldbackground设置，让标签背景色能够显示
     style.configure("CustomTreeview.Treeview", 
                    font=("Segoe UI", 9, "bold"),
                    foreground="#1E293B",
                    rowheight=28,
+                   bordercolor="#E2E8F0",
                    relief="flat")
     
     # 设置Treeview选中项样式
@@ -2698,17 +2862,8 @@ def create_gui():
         }
         
         for record in all_records:
-            quality = record.quality
-            # 处理繁体中文品质，映射到简体中文键
-            if quality == "傳說":
-                quality = "传说"
-            elif quality == "傳奇":
-                quality = "传奇"
-            elif quality == "標準":
-                quality = "标准"
-            
-            if quality in quality_counts:
-                quality_counts[quality] += 1
+            if record.quality in quality_counts:
+                quality_counts[record.quality] += 1
         
         # 合并传说和传奇的计数（因为它们是同一品质的不同名称）
         total_legendary = quality_counts["传说"] + quality_counts["传奇"]
@@ -2823,6 +2978,131 @@ def create_gui():
     # 初始加载
     update_fish_display()
 
+    # ==================== 运行日志卡片 ====================
+    log_card = ttkb.Labelframe(
+        log_frame,
+        text=" 📝 运行日志 ",
+        padding=12,
+        bootstyle="primary"
+    )
+    log_card.pack(fill=BOTH, expand=YES)
+    
+    # 控制按钮框架
+    log_control_frame = ttkb.Frame(log_card)
+    log_control_frame.pack(fill=X, pady=(0, 10))
+    
+    # 清空日志按钮
+    def clear_logs():
+        """清空运行日志"""
+        result = messagebox.askyesno("确认清空", "确定要清空所有运行日志吗？", parent=root)
+        if result:
+            global log_history
+            with log_history_lock:
+                log_history.clear()
+            # 清空文本框
+            log_text.config(state="normal")
+            log_text.delete(1.0, tk.END)
+            log_text.config(state="disabled")
+            print("🧹 [日志] 运行日志已清空")
+    
+    clear_log_btn = ttkb.Button(
+        log_control_frame,
+        text="🧹 清空日志",
+        command=clear_logs,
+        bootstyle="danger-outline",
+        width=12
+    )
+    clear_log_btn.pack(side=LEFT, padx=(0, 10))
+    
+    # 自动滚动开关
+    auto_scroll_var = tk.BooleanVar(value=True)
+    auto_scroll_check = ttkb.Checkbutton(
+        log_control_frame,
+        text="自动滚动到底部",
+        variable=auto_scroll_var,
+        bootstyle="info"
+    )
+    auto_scroll_check.pack(side=LEFT, padx=(0, 10))
+    
+    # 日志行数显示
+    log_count_var = ttkb.StringVar(value="日志行数: 0")
+    log_count_label = ttkb.Label(
+        log_control_frame,
+        textvariable=log_count_var,
+        bootstyle="info",
+        font=("Segoe UI", 9)
+    )
+    log_count_label.pack(side=LEFT)
+    
+    # 日志显示区域
+    log_text_frame = ttkb.Frame(log_card)
+    log_text_frame.pack(fill=BOTH, expand=YES)
+    
+    # 垂直滚动条
+    log_scroll_y = ttkb.Scrollbar(log_text_frame, orient="vertical", bootstyle="secondary")
+    log_scroll_y.pack(side=RIGHT, fill=Y)
+    
+    # 水平滚动条
+    log_scroll_x = ttkb.Scrollbar(log_text_frame, orient="horizontal", bootstyle="secondary")
+    log_scroll_x.pack(side=BOTTOM, fill=X)
+    
+    # 日志文本框
+    global log_text
+    log_text = tk.Text(
+        log_text_frame,
+        wrap="word",  # 自动换行
+        font=("Consolas", 8),
+        bg="#1a1a1a",
+        fg="#e0e0e0",
+        insertbackground="blue",
+        yscrollcommand=log_scroll_y.set,
+        xscrollcommand=log_scroll_x.set,
+        state="disabled",
+        relief="flat",
+        borderwidth=0
+    )
+    log_text.pack(side=LEFT, fill=BOTH, expand=YES)
+    
+    # 配置滚动条
+    log_scroll_y.config(command=log_text.yview)
+    
+    # 配置文本标签（颜色）
+    log_text.tag_configure("error", foreground="#ff6b6b")  # 红色，错误信息
+    log_text.tag_configure("warning", foreground="#ffd93d")  # 黄色，警告信息
+    log_text.tag_configure("info", foreground="#4ecdc4")  # 青色，信息
+    log_text.tag_configure("save", foreground="#1dd1a1")  # 绿色，保存成功
+    log_text.tag_configure("init", foreground="#54a0ff")  # 蓝色，初始化
+    log_text.tag_configure("status", foreground="#5f27cd")  # 紫色，状态变化
+    log_text.tag_configure("fish", foreground="#ff9ff3")  # 粉色，钓鱼记录
+    log_text.tag_configure("template", foreground="#f368e0")  # 紫红色，模板相关
+    log_text.tag_configure("time", foreground="#54a0ff")  # 蓝色，时间信息
+    log_text.tag_configure("screenshot", foreground="#ff9f43")  # 橙色，截图相关
+    log_text.tag_configure("hint", foreground="#54a0ff")  # 蓝色，提示信息
+    log_text.tag_configure("debug", foreground="#c8d6e5")  # 浅灰色，调试信息
+    log_text.tag_configure("session", foreground="#00cec9")  # 青色，会话信息
+    log_text.tag_configure("ocr", foreground="#a29bfe")  # 紫色，OCR相关
+    
+    # 定时更新日志显示
+    def update_log_display_periodic():
+        """定时更新运行日志显示"""
+        try:
+            if root.winfo_exists():
+                update_log_display(log_text)
+                # 更新日志行数显示
+                line_count = int(log_text.index("end-1c").split(".")[0])
+                log_count_var.set(f"日志行数: {line_count}")
+                # 设置下次更新
+                root.after(500, update_log_display_periodic)  # 每500ms更新一次
+        except:
+            pass  # 窗口关闭时忽略错误
+    
+    # 启动日志更新
+    root.after(100, update_log_display_periodic)
+    
+    # 添加初始日志
+    initial_log = "[系统] 运行日志界面已初始化，所有控制台输出将显示在此处"
+    log_history.append(initial_log)
+    print("📋 [系统] 运行日志界面已启动")
 
     # ==================== 操作按钮区域（左侧面板底部） ====================
     btn_frame = ttkb.Frame(left_content_frame)
@@ -3083,6 +3363,7 @@ def create_gui():
     
     # 运行 GUI
     root.mainloop()
+
 # =========================
 # =========================
 # 常数 t 定义：定义时间间隔为 0.3 秒（可以根据需要调整）
@@ -3340,13 +3621,15 @@ QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说", "传奇", "�
 # GUI专用品质列表，不包含"传奇"选项，避免在GUI筛选中显示
 GUI_QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说"]
 QUALITY_COLORS = {
-    # 将标准和繁体标准合并为同一图标配置
-    **{q: "⚪" for q in ["标准", "標準"]},
+    "标准": "⚪",
     "非凡": "🟢",
     "稀有": "🔵",
     "史诗": "🟣",
-    # 将传说、传奇、傳說、傳奇合并为同一图标配置
-    **{q: "🟡" for q in ["传说", "传奇", "傳說", "傳奇"]}  # 传奇与传说同级，使用相同图标
+    "传说": "🟡",
+    "传奇": "🟡",  # 传奇与传说同级，使用相同颜色（用于兼容旧记录）
+    "標準": "⚪",  # 繁体：标准
+    "傳說": "🟡",  # 繁体：传说
+    "傳奇": "🟡"   # 繁体：传奇
 }
 
 # 当前会话数据
@@ -3971,11 +4254,11 @@ def search_fish_records(keyword="", quality_filter="全部", use_session=True):
             # 品质筛选 - 合并"传说"和"传奇"，以及"标准"和"標準"
             if quality_filter != "全部":
                 if quality_filter == "传说":
-                    # 筛选传说时也包含传奇、傳說、傳奇  
+                    # 筛选传说时也包含传奇
                     if record.quality not in ["传说", "传奇", "傳說", "傳奇"]:
                         continue
                 elif quality_filter == "标准":
-                    # 筛选标准时也包含繁体標準 
+                    # 筛选标准时也包含繁体標準
                     if record.quality not in ["标准", "標準"]:
                         continue
                 else:
@@ -5042,7 +5325,7 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v.2.9-beta-3".ljust(44)+"║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v.2.9-beta-4".ljust(44)+"║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
