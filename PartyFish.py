@@ -2544,7 +2544,7 @@ def create_gui():
     divider.pack(fill=X, pady=10)
 
     # 记录列表容器（包含Treeview和滚动条）- 现代化设计
-    tree_container = ttkb.Frame(fish_record_card, borderwidth=1, relief="solid")
+    tree_container = ttkb.Frame(fish_record_card)
     tree_container.pack(fill=BOTH, expand=YES, pady=(0, 8))
 
     # 记录列表（使用Treeview）
@@ -2593,23 +2593,25 @@ def create_gui():
     # 配置品质颜色标签（背景色和前景色）- 优化配色方案
     # 标准-浅灰色, 非凡-清新绿, 稀有-海洋蓝, 史诗-优雅紫, 传说/传奇-尊贵金
     # 文字颜色统一为黑色，背景色使用更鲜艳的颜色
-    fish_tree.tag_configure("标准", background="#FFFFFF", foreground="#000000")
-    fish_tree.tag_configure("標準", background="#FFFFFF", foreground="#000000")  # 繁体标准
-    fish_tree.tag_configure("非凡", background="#2ECC71", foreground="#000000")
-    fish_tree.tag_configure("稀有", background="#1E90FF", foreground="#FFFFFF")
-    fish_tree.tag_configure("史诗", background="#9B59B6", foreground="#FFFFFF")
-    fish_tree.tag_configure("传说", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("傳說", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("传奇", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("傳奇", background="#F1C40F", foreground="#000000")  # 传奇与传说同色
-
+    quality_colors = {
+        # 将标准和繁体标准合并为同一颜色配置
+        **{q: ("#FFFFFF", "#000000") for q in ["标准", "標準"]},
+        "非凡": ("#2ECC71", "#000000"),
+        "稀有": ("#1E90FF", "#FFFFFF"),
+        "史诗": ("#9B59B6", "#FFFFFF"),
+        # 将传说、傳說、传奇、傳奇合并为同一颜色配置
+        **{q: ("#F1C40F", "#000000") for q in ["传说", "傳說", "传奇", "傳奇"]}
+    }
+    
+    for quality, (bg, fg) in quality_colors.items():
+        fish_tree.tag_configure(quality, background=bg, foreground=fg)
+    
     # 设置Treeview行高和字体 - 现代化设计
     # 移除background和fieldbackground设置，让标签背景色能够显示
     style.configure("CustomTreeview.Treeview", 
                    font=("Segoe UI", 9, "bold"),
                    foreground="#1E293B",
                    rowheight=28,
-                   bordercolor="#E2E8F0",
                    relief="flat")
     
     # 设置Treeview选中项样式
@@ -2696,8 +2698,17 @@ def create_gui():
         }
         
         for record in all_records:
-            if record.quality in quality_counts:
-                quality_counts[record.quality] += 1
+            quality = record.quality
+            # 处理繁体中文品质，映射到简体中文键
+            if quality == "傳說":
+                quality = "传说"
+            elif quality == "傳奇":
+                quality = "传奇"
+            elif quality == "標準":
+                quality = "标准"
+            
+            if quality in quality_counts:
+                quality_counts[quality] += 1
         
         # 合并传说和传奇的计数（因为它们是同一品质的不同名称）
         total_legendary = quality_counts["传说"] + quality_counts["传奇"]
@@ -3329,15 +3340,13 @@ QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说", "传奇", "�
 # GUI专用品质列表，不包含"传奇"选项，避免在GUI筛选中显示
 GUI_QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说"]
 QUALITY_COLORS = {
-    "标准": "⚪",
+    # 将标准和繁体标准合并为同一图标配置
+    **{q: "⚪" for q in ["标准", "標準"]},
     "非凡": "🟢",
     "稀有": "🔵",
     "史诗": "🟣",
-    "传说": "🟡",
-    "传奇": "🟡",  # 传奇与传说同级，使用相同颜色（用于兼容旧记录）
-    "標準": "⚪",  # 繁体：标准
-    "傳說": "🟡",  # 繁体：传说
-    "傳奇": "🟡"   # 繁体：传奇
+    # 将传说、传奇、傳說、傳奇合并为同一图标配置
+    **{q: "🟡" for q in ["传说", "传奇", "傳說", "傳奇"]}  # 传奇与传说同级，使用相同图标
 }
 
 # 当前会话数据
@@ -3962,11 +3971,11 @@ def search_fish_records(keyword="", quality_filter="全部", use_session=True):
             # 品质筛选 - 合并"传说"和"传奇"，以及"标准"和"標準"
             if quality_filter != "全部":
                 if quality_filter == "传说":
-                    # 筛选传说时也包含传奇
+                    # 筛选传说时也包含传奇、傳說、傳奇  
                     if record.quality not in ["传说", "传奇", "傳說", "傳奇"]:
                         continue
                 elif quality_filter == "标准":
-                    # 筛选标准时也包含繁体標準
+                    # 筛选标准时也包含繁体標準 
                     if record.quality not in ["标准", "標準"]:
                         continue
                 else:
