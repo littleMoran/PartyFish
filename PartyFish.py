@@ -84,8 +84,9 @@ class LogRedirector:
         self.buffer = io.StringIO()
         
     def write(self, text):
-        # 写入到原始流
-        self.original_stream.write(text)
+        # 写入到原始流，只有当original_stream不为None时才写入
+        if self.original_stream is not None:
+            self.original_stream.write(text)
         # 如果文本不为空，添加到日志队列
         if text.strip():
             timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -879,13 +880,25 @@ def show_debug_window():
     try:
         import sys
         import os
+        import tkinter as tk
         if hasattr(sys, '_MEIPASS'):
-            icon_path = os.path.join(sys._MEIPASS, "666.ico")
+            # 打包后使用_internal目录
+            icon_path = os.path.join(sys._MEIPASS, "_internal", "666.ico")
+            # 如果_internal目录不存在，尝试直接在MEIPASS下查找
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(sys._MEIPASS, "666.ico")
         else:
             icon_path = "666.ico"
-        debug_window.iconbitmap(icon_path)
-    except:
-        pass
+        
+        # 使用iconphoto方法设置图标，同时支持窗口和任务栏图标
+        icon = tk.PhotoImage(file=icon_path)
+        debug_window.iconphoto(True, icon)
+    except Exception as e:
+        # 如果iconphoto失败，尝试回退到iconbitmap
+        try:
+            debug_window.iconbitmap(icon_path)
+        except:
+            pass
     
     # 主框架
     main_frame = ttkb.Frame(debug_window, padding=12)
@@ -1339,16 +1352,27 @@ def create_gui():
     try:
         import sys
         import os
+        import tkinter as tk
         # 处理PyInstaller打包后的资源路径
         if hasattr(sys, '_MEIPASS'):
             # 打包后使用_internal目录
-            icon_path = os.path.join(sys._MEIPASS, "666.ico")
+            icon_path = os.path.join(sys._MEIPASS, "_internal", "666.ico")
+            # 如果_internal目录不存在，尝试直接在MEIPASS下查找
+            if not os.path.exists(icon_path):
+                icon_path = os.path.join(sys._MEIPASS, "666.ico")
         else:
             # 开发环境使用当前目录
             icon_path = "666.ico"
-        root.iconbitmap(icon_path)
-    except:
-        pass
+        
+        # 使用iconphoto方法设置图标，同时支持窗口和任务栏图标
+        icon = tk.PhotoImage(file=icon_path)
+        root.iconphoto(True, icon)  # True表示同时设置窗口和任务栏图标
+    except Exception as e:
+        # 如果iconphoto失败，尝试回退到iconbitmap
+        try:
+            root.iconbitmap(icon_path)
+        except:
+            pass
     
     # 响应式布局：窗口大小变化时调整布局
     def on_window_resize(event):
@@ -2759,16 +2783,19 @@ def create_gui():
     # 配置品质颜色标签（背景色和前景色）- 优化配色方案
     # 标准-浅灰色, 非凡-清新绿, 稀有-海洋蓝, 史诗-优雅紫, 传说/传奇-尊贵金
     # 文字颜色统一为黑色，背景色使用更鲜艳的颜色
-    fish_tree.tag_configure("标准", background="#FFFFFF", foreground="#000000")
-    fish_tree.tag_configure("標準", background="#FFFFFF", foreground="#000000")  # 繁体标准
-    fish_tree.tag_configure("非凡", background="#2ECC71", foreground="#000000")
-    fish_tree.tag_configure("稀有", background="#1E90FF", foreground="#FFFFFF")
-    fish_tree.tag_configure("史诗", background="#9B59B6", foreground="#FFFFFF")
-    fish_tree.tag_configure("传说", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("傳說", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("传奇", background="#F1C40F", foreground="#000000")
-    fish_tree.tag_configure("傳奇", background="#F1C40F", foreground="#000000")  # 传奇与传说同色
-
+    quality_colors = {
+        # 将标准和繁体标准合并为同一颜色配置
+        **{q: ("#FFFFFF", "#000000") for q in ["标准", "標準"]},
+        "非凡": ("#2ECC71", "#000000"),
+        "稀有": ("#1E90FF", "#FFFFFF"),
+        "史诗": ("#9B59B6", "#FFFFFF"),
+        # 将传说、傳說、传奇、傳奇合并为同一颜色配置
+        **{q: ("#F1C40F", "#000000") for q in ["传说", "傳說", "传奇", "傳奇"]}
+    }
+    
+    for quality, (bg, fg) in quality_colors.items():
+        fish_tree.tag_configure(quality, background=bg, foreground=fg)
+    
     # 设置Treeview行高和字体 - 现代化设计
     # 移除background和fieldbackground设置，让标签背景色能够显示
     style.configure("CustomTreeview.Treeview", 
@@ -2862,8 +2889,17 @@ def create_gui():
         }
         
         for record in all_records:
-            if record.quality in quality_counts:
-                quality_counts[record.quality] += 1
+            quality = record.quality
+            # 处理繁体中文品质，映射到简体中文键
+            if quality == "傳說":
+                quality = "传说"
+            elif quality == "傳奇":
+                quality = "传奇"
+            elif quality == "標準":
+                quality = "标准"
+            
+            if quality in quality_counts:
+                quality_counts[quality] += 1
         
         # 合并传说和传奇的计数（因为它们是同一品质的不同名称）
         total_legendary = quality_counts["传说"] + quality_counts["传奇"]
@@ -2911,7 +2947,7 @@ def create_gui():
             total_var.set(f"{total_icon} 历史总计: {total} 条")
 
         # 显示记录（倒序，最新的在前面）
-        for record in reversed(filtered[-100:]):  # 最多显示100条
+        for record in reversed(filtered[-300:]):  # 最多显示300条
             # 直接使用完整时间戳（格式：YYYY-MM-DD HH:MM:SS）
             time_display = record.timestamp if record.timestamp else "未知时间"
 
@@ -3171,7 +3207,7 @@ def create_gui():
 
     version_label = ttkb.Label(
         left_status_frame,
-        text="v.2.9-beta-3 | PartyFish",
+        text="v.2.9.1 | PartyFish",
         bootstyle="light",
         font=("Segoe UI", 8, "bold")
     )
@@ -3621,15 +3657,13 @@ QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说", "传奇", "�
 # GUI专用品质列表，不包含"传奇"选项，避免在GUI筛选中显示
 GUI_QUALITY_LEVELS = ["标准", "非凡", "稀有", "史诗", "传说"]
 QUALITY_COLORS = {
-    "标准": "⚪",
+ # 将标准和繁体标准合并为同一图标配置
+    **{q: "⚪" for q in ["标准", "標準"]},
     "非凡": "🟢",
     "稀有": "🔵",
     "史诗": "🟣",
-    "传说": "🟡",
-    "传奇": "🟡",  # 传奇与传说同级，使用相同颜色（用于兼容旧记录）
-    "標準": "⚪",  # 繁体：标准
-    "傳說": "🟡",  # 繁体：传说
-    "傳奇": "🟡"   # 繁体：传奇
+# 将传说、传奇、傳說、傳奇合并为同一图标配置
+    **{q: "🟡" for q in ["传说", "传奇", "傳說", "傳奇"]}  # 传奇与传说同级，使用相同图标
 }
 
 # 当前会话数据
@@ -5325,7 +5359,7 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v.2.9-beta-4".ljust(44)+"║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v.2.9.1".ljust(44)+"║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(f"║  📺 当前分辨率: {CURRENT_SCREEN_WIDTH}×{CURRENT_SCREEN_HEIGHT}".ljust(45)+"║")
