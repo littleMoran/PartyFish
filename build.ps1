@@ -51,6 +51,7 @@ try {
         --hidden-import=ttkbootstrap `
         --hidden-import=mss `
         --hidden-import=yaml `
+        --hidden-import=winsound `
         PartyFish.py
 
     Write-Host "✅ 打包完成！" -ForegroundColor Green
