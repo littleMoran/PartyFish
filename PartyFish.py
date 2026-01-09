@@ -3686,8 +3686,9 @@ def create_gui():
     print("📋 [系统] 运行日志界面已启动")
 
     # ==================== 操作按钮区域（左侧面板底部） ====================
-    btn_frame = ttkb.Frame(left_content_frame)
-    btn_frame.pack(fill=X, pady=(12, 0))
+    # 将按钮框架从可滚动区域移到左侧面板，使其固定显示
+    btn_frame = ttkb.Frame(left_panel)
+    btn_frame.pack(fill=X, padx=12, pady=(0, 8))
 
     # 使用网格布局实现更紧凑的按钮排列
     btn_frame.columnconfigure(0, weight=1)
@@ -5669,7 +5670,7 @@ def bucket_full_detection_thread():
     """鱼桶满独立检测线程 - 修复版
     检测完整钓鱼循环的时长，而不是抛竿间隔
     """
-    global fish_bucket_full_detected, bucket_full_by_interval
+    global fish_bucket_full_detected, bucket_full_by_interval, paogantime
 
     short_cycle_count = 0  # 短循环计数器
     last_reset_time = time.time()  # 上次重置计数器的时间
@@ -5716,13 +5717,16 @@ def bucket_full_detection_thread():
             # - 识别鱼信息（0.5秒）
             # 总计：正常至少7-20秒
 
-            # 鱼桶满/没鱼饵时的特征：循环异常短（<3秒）
-            BUCKET_FULL_THRESHOLD = 3.0  # 3秒阈值
+            # 鱼桶满/没鱼饵时的特征：循环异常短
+            # 动态阈值计算：基于当前抛竿时间，确保正常循环不会被误判
+            # - 基于当前抛竿时间的1.5倍
+            # - 对于短抛竿时间，设置最小阈值2秒
+            dynamic_threshold = max(2.0, paogantime * 1.5)
 
-            if last_interval < BUCKET_FULL_THRESHOLD:
+            if last_interval < dynamic_threshold:
                 short_cycle_count += 1
                 print(
-                    f"⚠️  [检测] 检测到短循环 #{short_cycle_count}: {last_interval:.2f}秒 (<{BUCKET_FULL_THRESHOLD}秒)"
+                    f"⚠️  [检测] 检测到短循环 #{short_cycle_count}: {last_interval:.2f}秒 (<{dynamic_threshold:.2f}秒)"
                 )
 
                 # 连续3次短循环才判定为鱼桶满
@@ -5732,25 +5736,33 @@ def bucket_full_detection_thread():
                     and not fish_bucket_full_detected
                     and not bucket_full_by_interval
                 ):
+                    # 额外验证：检查所有记录的循环是否都异常短
+                    all_short = True
+                    for i in range(1, len(timestamps)):
+                        interval = timestamps[i] - timestamps[i-1]
+                        if interval >= dynamic_threshold:
+                            all_short = False
+                            break
+                    
+                    if all_short or len(timestamps) <= 5:  # 对于少量记录，直接判定
+                        print(
+                            f"🪣  [警告] 连续{short_cycle_count}次短循环，判定为鱼桶满/没鱼饵！"
+                        )
+                        print(
+                            f"   最近{len(timestamps)}次循环时长: {[round(timestamps[i]-timestamps[i-1], 2) for i in range(1, len(timestamps))]}"
+                        )
 
-                    print(
-                        f"🪣  [警告] 连续{short_cycle_count}次短循环，判定为鱼桶满/没鱼饵！"
-                    )
-                    print(
-                        f"   最近{len(timestamps)}次循环时长: {[timestamps[i]-timestamps[i-1] for i in range(1, len(timestamps))]}"
-                    )
-
-                    bucket_full_by_interval = True
-                    fish_bucket_full_detected = True
-                    handle_fish_bucket_full()
+                        bucket_full_by_interval = True
+                        fish_bucket_full_detected = True
+                        handle_fish_bucket_full()
             else:
                 # 正常循环，重置计数器
                 if short_cycle_count > 0:
-                    if last_interval > 5.0:  # 只有明显正常的循环才重置
-                        print(
-                            f"✅ [检测] 恢复正常循环: {last_interval:.2f}秒，重置短循环计数器"
-                        )
-                        short_cycle_count = 0
+                    # 当检测到符合动态阈值的正常循环时重置计数器
+                    print(
+                        f"✅ [检测] 恢复正常循环: {last_interval:.2f}秒，重置短循环计数器"
+                    )
+                    short_cycle_count = 0
 
             time.sleep(0.5)  # 每0.5秒检查一次
 
