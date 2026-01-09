@@ -6277,7 +6277,12 @@ def pressandreleasemousebutton():
     # 先检查是否需要处理加时
     with mss.mss() as temp_scr:
         if handle_jiashi_in_action(temp_scr):
-            return
+            return True
+
+        # [新增] 故障检测：检查是否断线或超时（回到待机状态）
+        if f1_mached(temp_scr) or f2_mached(temp_scr):
+            print("⚠️ [监测] 检测到异常，判定为断线或鱼跑了，本轮结束")
+            return False
 
     user32.mouse_event(0x02, 0, 0, 0, 0)
     jittered_down = add_jitter(leftclickdown)
@@ -6287,6 +6292,7 @@ def pressandreleasemousebutton():
     jittered_up = add_jitter(leftclickup)
     time.sleep(jittered_up)
     print_timing_info("放线", leftclickup, jittered_up)
+    return True
 
 
 def ensure_mouse_down():
@@ -7033,7 +7039,10 @@ def main():
                             current_times = times
                         if a <= current_times:
                             a += 1
-                            pressandreleasemousebutton()  # 执行点击循环直到识别到 star.png
+                            # 调用优化后的点击循环函数，如果返回False表示遇到异常需中断
+                            if not pressandreleasemousebutton():
+                                a = 0
+                                break
                         else:
                             a = 0
                             print("🎣 [提示] 达到最大拉杆次数，本轮结束")
