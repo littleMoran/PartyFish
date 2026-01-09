@@ -18,6 +18,7 @@ pyinstaller --noconfirm ^
     --hidden-import=ttkbootstrap ^
     --hidden-import=mss ^
     --hidden-import=yaml ^
+    --hidden-import=winsound ^
     PartyFish.py
 
 echo 打包完成！

@@ -33,7 +33,7 @@ import mss
 
 
 # =========================
-# 全局图标管理
+# 全局资源路径管理
 # =========================
 def get_icon_path():
     """获取666.ico图标的路径，处理不同环境下的路径问题
@@ -45,16 +45,32 @@ def get_icon_path():
     import os
 
     if hasattr(sys, "_MEIPASS"):
-        # 打包后使用_internal目录
-        icon_path = os.path.join(sys._MEIPASS, "_internal", "666.ico")
-        # 如果_internal目录不存在，尝试直接在MEIPASS下查找
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(sys._MEIPASS, "666.ico")
+        # 打包后直接在MEIPASS下查找
+        icon_path = os.path.join(sys._MEIPASS, "666.ico")
     else:
         # 开发环境下直接使用当前目录
         icon_path = "666.ico"
 
     return icon_path
+
+
+def get_resources_path():
+    """获取resources目录的路径，处理不同环境下的路径问题
+
+    Returns:
+        str: resources目录的完整路径
+    """
+    import sys
+    import os
+
+    if hasattr(sys, "_MEIPASS"):
+        # 打包后resources目录在MEIPASS下
+        resources_path = os.path.join(sys._MEIPASS, "resources")
+    else:
+        # 开发环境下直接使用当前目录下的resources
+        resources_path = os.path.join(".", "resources")
+
+    return resources_path
 
 
 def set_window_icon(window):
@@ -4324,7 +4340,7 @@ def update_region_coords():
 # =========================
 # 参数设置
 # =========================
-template_folder_path = os.path.join(".", "resources")
+template_folder_path = get_resources_path()
 
 # =========================
 # 鱼饵识别算法配置

@@ -2,9 +2,9 @@
 from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('resources', 'resources')]
+datas = [('resources', 'resources'), ('666.ico', '.')]
 binaries = []
-hiddenimports = ['rapidocr_onnxruntime', 'onnxruntime', 'cv2', 'numpy', 'PIL', 'pynput', 'ttkbootstrap', 'mss', 'yaml', 'winsound']
+hiddenimports = ['rapidocr_onnxruntime', 'onnxruntime', 'cv2', 'numpy', 'PIL', 'pynput', 'ttkbootstrap', 'mss', 'yaml', 'winsound', 'time', 'os', 'webbrowser', 'warnings', 'threading', 'ctypes', 'datetime', 're', 'queue', 'random', 'tkinter', 'json']
 datas += collect_data_files('rapidocr_onnxruntime')
 tmp_ret = collect_all('rapidocr_onnxruntime')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -30,13 +30,16 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='PartyFish',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -45,13 +48,4 @@ exe = EXE(
     entitlements_file=None,
     uac_admin=True,
     icon=['666.ico'],
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='PartyFish',
 )

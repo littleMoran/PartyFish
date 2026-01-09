@@ -52,9 +52,11 @@ try {
     & $pythonPath -m PyInstaller `
         --noconfirm `
         --name "PartyFish" `
+        --onefile `
         --windowed `
         --icon "666.ico" `
         --add-data "resources;resources" `
+        --add-data "666.ico;." `
         --uac-admin `
         --collect-data rapidocr_onnxruntime `
         --collect-all rapidocr_onnxruntime `
@@ -69,6 +71,18 @@ try {
         --hidden-import=mss `
         --hidden-import=yaml `
         --hidden-import=winsound `
+        --hidden-import=time `
+        --hidden-import=os `
+        --hidden-import=webbrowser `
+        --hidden-import=warnings `
+        --hidden-import=threading `
+        --hidden-import=ctypes `
+        --hidden-import=datetime `
+        --hidden-import=re `
+        --hidden-import=queue `
+        --hidden-import=random `
+        --hidden-import=tkinter `
+        --hidden-import=json `
         PartyFish.py
 
     Write-Host "Build completed successfully!" -ForegroundColor Green
