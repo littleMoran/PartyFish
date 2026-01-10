@@ -1278,6 +1278,27 @@ def show_debug_window():
     )
     refresh_btn.pack(side=RIGHT, padx=(10, 0))
 
+    # UNO相关按钮
+    def uno_toggle_recognition():
+        """切换UNO持续识别"""
+        global uno_recognition_running
+        if uno_recognition_running:
+            uno_stop_continuous_recognition()
+        else:
+            uno_start_continuous_recognition()
+
+    def uno_test_popup():
+        """测试UNO弹窗"""
+        uno_show_popup()
+
+    uno_test_btn = ttkb.Button(
+        control_frame,
+        text="📝 测试UNO弹窗",
+        command=uno_test_popup,
+        bootstyle="info-outline",
+    )
+    uno_test_btn.pack(side=RIGHT, padx=(10, 0))
+
     # 调试模式开关
     debug_mode_var = ttkb.BooleanVar(value=debug_mode)
     debug_mode_check = ttkb.Checkbutton(
@@ -1587,6 +1608,8 @@ def update_log_display(log_text_widget, auto_scroll=True):
 def create_gui():
     # 加载保存的参数
     load_parameters()
+    # 声明全局变量
+    global uno_input1_var, uno_input2_var, root
 
     # 创建现代化主题窗口
     root = ttkb.Window(themename="darkly")  # 使用深色主题
@@ -2790,16 +2813,6 @@ def create_gui():
     )
     uno_card.pack(fill=X, pady=(0, 8))
 
-    # UNO描述文本
-    uno_desc = ttkb.Label(
-        uno_card,
-        text="这是UNO的UI界面，目前仅显示UI元素，暂未实现功能。",
-        font=("Segoe UI", 9),
-        bootstyle="primary",
-        wraplength=180,
-    )
-    uno_desc.pack(pady=(0, 8))
-
     # UNO开关
     uno_var = ttkb.IntVar(value=0)
 
@@ -3000,6 +3013,32 @@ def create_gui():
 
     # 设置UNO热键按钮的点击事件
     uno_hotkey_btn.configure(command=uno_start_hotkey_capture)
+
+    # UNO输入框设置
+    uno_inputs_frame = ttkb.Frame(uno_card)
+    uno_inputs_frame.pack(fill=X, pady=8)
+
+    # 当前牌数
+    uno_input1_frame = ttkb.Frame(uno_inputs_frame)
+    uno_input1_frame.pack(fill=X, pady=4)
+    uno_input1_label = ttkb.Label(uno_input1_frame, text="当前牌数:", font=('Segoe UI', 9), bootstyle="primary", width=8)
+    uno_input1_label.pack(side=LEFT, padx=(0, 8))
+    uno_input1_var = ttkb.IntVar(value=7)
+    uno_input1_spacer = ttkb.Frame(uno_input1_frame)
+    uno_input1_spacer.pack(side=LEFT, fill=X, expand=YES)
+    uno_input1 = ttkb.Entry(uno_input1_frame, textvariable=uno_input1_var, width=2, font=('Segoe UI', 9), bootstyle="light", state="readonly") 
+    uno_input1.pack(side=RIGHT, padx=(0, 5))  # 靠右显示，右边间距5
+
+    #抽取牌数次数
+    uno_input2_frame = ttkb.Frame(uno_inputs_frame)
+    uno_input2_frame.pack(fill=X, pady=4)
+    uno_input2_label = ttkb.Label(uno_input2_frame, text="抽取牌数:", font=('Segoe UI', 9), bootstyle="primary", width=8)
+    uno_input2_label.pack(side=LEFT, padx=(0, 8))
+    uno_input2_var = ttkb.IntVar(value=35)
+    uno_input2_spacer = ttkb.Frame(uno_input2_frame)
+    uno_input2_spacer.pack(side=LEFT, fill=X, expand=YES)
+    uno_input2 = ttkb.Entry(uno_input2_frame, textvariable=uno_input2_var, width=2, bootstyle="primary")  
+    uno_input2.pack(side=RIGHT, padx=(0, 5))  # 靠右显示，右边间距5
 
     # ==================== 右侧面板（钓鱼记录区域） ====================
     right_panel = ttkb.Frame(main_frame)
@@ -3847,7 +3886,7 @@ def create_gui():
         title_label.bind("<Button-1>", lambda e: open_github())
 
         # 开发者列表
-        developers = ["FadedTUMI", "PeiXiaoXiao", "MaiDong", "Lizhe"]
+        developers = ["FadedTUMI", "PeiXiaoXiao", "MaiDong"]
 
         for dev in developers:
             dev_label = ttkb.Label(
@@ -5719,9 +5758,9 @@ def bucket_full_detection_thread():
 
             # 鱼桶满/没鱼饵时的特征：循环异常短
             # 动态阈值计算：基于当前抛竿时间，确保正常循环不会被误判
-            # - 基于当前抛竿时间的+0.8秒
-            # - 对于短抛竿时间，设置最小阈值0.5秒
-            dynamic_threshold = max(0.5, paogantime + 0.8)
+            # - 基于当前抛竿时间的1.5倍
+            # - 对于短抛竿时间，设置最小阈值2秒
+            dynamic_threshold = max(1.0, paogantime * 1)
 
             if last_interval < dynamic_threshold:
                 short_cycle_count += 1
@@ -5842,6 +5881,7 @@ f1 = None
 f2 = None
 shangyule = None
 jiashi = None
+tiao_template = None  # UNO条模板
 jiashi_var = 0
 # 模板缩放后的缓存（用于分辨率切换时重新加载）
 _cached_scale_x = None
@@ -5858,6 +5898,17 @@ hotkey_main_key = keyboard.Key.f2  # 主按键对象
 uno_hotkey_name = "F3"  # 默认UNO热键显示名称
 uno_hotkey_modifiers = set()  # UNO热键修饰键集合
 uno_hotkey_main_key = keyboard.Key.f3  # UNO热键主按键对象
+# UNO卡计数变量
+global uno_input1_var, uno_input2_var  # 当前牌数和抽取牌数变量
+uno_input1_var = None
+uno_input2_var = None
+
+# UNO持续识别相关变量
+uno_recognition_running = False  # 持续识别状态
+uno_recognition_thread = None  # 持续识别线程
+
+# 全局root变量声明
+root = None
 
 
 # 获取当前系统分辨率
@@ -6175,6 +6226,15 @@ def reload_templates_if_scale_changed():
             jiashi_path = os.path.join(template_folder_path, "chang_grayscale.png")
             img = Image.open(jiashi_path)
             jiashi = scale_template(np.array(img), scale, scale)
+
+            # UNO条模板
+            try:
+                tiao_path = os.path.join(template_folder_path, "tiao_gray.png")
+                img = Image.open(tiao_path)
+                tiao_template = scale_template(np.array(img), scale, scale)
+            except Exception as e:
+                print(f"⚠️ [模板] 加载UNO条模板失败: {e}")
+                tiao_template = None
 
             print(
                 f"✅ [模板] 所有模板重新加载完成，共 {len(templates)} 个数字模板 (统一缩放: {scale:.2f})"
@@ -6623,6 +6683,356 @@ def f1_mached(scr):
     return False
 
 
+# 识别UNO条
+def uno_recognize_tiao(scr):
+    """识别UNO条模板
+    
+    Args:
+        scr: 截图对象
+    
+    Returns:
+        bool: 是否识别成功
+    """
+    global tiao_template
+    # 确保模板已加载
+    if tiao_template is None:
+        print("⚠️ [UNO] 模板未加载，尝试重新加载...")
+        load_tiao_template()
+    
+    if tiao_template is None:
+        print("❌ [UNO] 模板加载失败，无法识别")
+        return False
+    
+    # 捕获指定区域：2243, 1313, 264, 90
+    region_gray = capture_region(2242, 1314, 284, 100, scr)
+    if region_gray is None:
+        print("❌ [UNO] 区域捕获失败")
+        return False
+    
+    # 执行模板匹配
+    h, w = region_gray.shape[:2]
+    t_h, t_w = tiao_template.shape[:2]
+    if h >= t_h and w >= t_w:
+        match_result = cv2.minMaxLoc(
+            cv2.matchTemplate(region_gray, tiao_template, cv2.TM_CCOEFF_NORMED)
+        )[1]
+        is_match = match_result > 0.8
+        print(f"🎮 [UNO] 识别结果: {'成功' if is_match else '失败'} (匹配度: {match_result:.2f})")
+        return is_match
+    return False
+
+# 加载UNO条模板
+def load_tiao_template():
+    """加载UNO条模板
+    
+    Returns:
+        numpy.ndarray: 加载的模板
+    """
+    global tiao_template
+    if tiao_template is None:
+        try:
+            tiao_path = os.path.join(template_folder_path, "tiao.png")
+            img = Image.open(tiao_path)
+            
+            # 无论原图是什么格式，都转换为灰度图像
+            if img.mode != 'L':
+                img = img.convert('L')
+            
+            template = np.array(img)
+            scale = SCALE_UNIFORM
+            tiao_template = scale_template(template, scale, scale)
+            
+            # 确保模板是CV_8U格式（8位无符号整数）
+            if tiao_template.dtype != np.uint8:
+                tiao_template = tiao_template.astype(np.uint8)
+                print(f"🔧 [UNO] 模板格式转换: {tiao_template.dtype} → uint8")
+            
+            # 确保模板是单通道灰度图像
+            if len(tiao_template.shape) > 2:
+                tiao_template = cv2.cvtColor(tiao_template, cv2.COLOR_BGR2GRAY)
+                print(f"🔧 [UNO] 模板通道转换: {tiao_template.shape} → 单通道")
+            
+            print("✅ [UNO] 模板加载成功")
+        except Exception as e:
+            print(f"❌ [UNO] 模板加载失败: {e}")
+            tiao_template = None
+    return tiao_template
+
+# 计算UNO点击位置
+def calculate_click_position():
+    """根据当前分辨率计算UNO点击位置
+    
+    Returns:
+        tuple: (x, y) 点击位置
+    """
+    global SCALE_X, SCALE_Y
+    
+    # 2K分辨率(2560×1440)下的原始位置
+    base_x = 2381
+    base_y = 1353
+    base_resolution = (2560, 1440)
+    
+    # 获取当前分辨率
+    current_width, current_height = get_current_screen_resolution()
+    
+    # 如果是2K分辨率，直接返回原始位置
+    if current_width == base_resolution[0] and current_height == base_resolution[1]:
+        print(f"🎮 [UNO] 2K分辨率，使用原始位置: ({base_x}, {base_y})")
+        return (base_x, base_y)
+    
+    # 其他分辨率使用缩放计算
+    # 计算缩放比例
+    scale_x = SCALE_X
+    scale_y = SCALE_Y
+    
+    # 计算点击位置
+    click_x = int(base_x * scale_x)
+    click_y = int(base_y * scale_y)
+    
+    print(f"🎮 [UNO] 分辨率 {current_width}×{current_height}，缩放比例 X={scale_x:.2f}, Y={scale_y:.2f}，点击位置: ({click_x}, {click_y})")
+    return (click_x, click_y)
+
+# UNO主处理函数
+def uno_process(scr):
+    """处理UNO卡识别和计数
+    
+    Args:
+        scr: 截图对象
+    
+    Returns:
+        bool: 是否处理成功
+    """
+    global uno_input1_var, uno_input2_var
+    
+    # 检查变量是否已初始化
+    if uno_input1_var is None or uno_input2_var is None:
+        print("❌ [UNO] 计数变量未初始化")
+        return False
+    
+    # 识别UNO条
+    if uno_recognize_tiao(scr):
+        # 获取当前牌数和抽取牌数
+        current_cards = uno_input1_var.get()
+        max_cards = uno_input2_var.get()
+        
+        print(f"🎮 [UNO] 当前牌数: {current_cards}, 抽取牌数: {max_cards}")
+        
+        # 如果当前牌数 < 抽取牌数，当前牌数+1
+        if current_cards < max_cards:
+            new_cards = current_cards + 1
+            uno_input1_var.set(new_cards)
+            print(f"🎮 [UNO] 牌数更新: {current_cards} → {new_cards}")
+            
+            # 检查是否达到抽取牌数
+            if new_cards >= max_cards:
+                print(f"🎮 [UNO] 已达到抽取牌数: {new_cards}/{max_cards}")
+                # 显示弹窗
+                uno_show_popup()
+        elif current_cards >= max_cards:
+            print(f"🎮 [UNO] 已达到抽取牌数: {current_cards}/{max_cards}")
+            # 显示弹窗
+            uno_show_popup()
+        
+        return True
+    return False
+
+# UNO持续识别函数
+def uno_continuous_recognition():
+    """持续识别UNO卡并执行点击操作
+    
+    该函数在单独线程中运行，直到uno_recognition_running为False
+    """
+    global uno_recognition_running
+    
+    print("🎮 [UNO] 开始持续识别")
+    
+    # 导入pyautogui用于点击操作
+    import pyautogui
+    import time
+    import mss
+    
+    # 创建截图对象
+    scr = mss.mss()
+    
+    try:
+        while uno_recognition_running:
+            # 识别UNO条
+            if uno_recognize_tiao(scr):
+                # 获取当前牌数和抽取牌数
+                current_cards = uno_input1_var.get()
+                max_cards = uno_input2_var.get()
+                
+                print(f"🎮 [UNO] 当前牌数: {current_cards}, 抽取牌数: {max_cards}")
+                
+                # 如果当前牌数 < 抽取牌数，当前牌数+1并执行点击
+                if current_cards < max_cards:
+                    new_cards = current_cards + 1
+                    uno_input1_var.set(new_cards)
+                    print(f"🎮 [UNO] 牌数更新: {current_cards} → {new_cards}")
+                    
+                    # 计算点击位置
+                    click_x, click_y = calculate_click_position()
+                    
+                    # 执行点击操作
+                    pyautogui.click(click_x, click_y)
+                    print(f"🎮 [UNO] 执行点击: ({click_x}, {click_y})")
+                    
+                    # 检查是否达到抽取牌数
+                    if new_cards >= max_cards:
+                        print(f"🎮 [UNO] 已达到抽取牌数: {new_cards}/{max_cards}")
+                        # 显示弹窗
+                        uno_show_popup()
+                elif current_cards >= max_cards:
+                    print(f"🎮 [UNO] 已达到抽取牌数: {current_cards}/{max_cards}")
+                    # 显示弹窗
+                    uno_show_popup()
+            
+            # 延迟一段时间，避免过于频繁的识别
+            time.sleep(0.5)
+    except Exception as e:
+        print(f"❌ [UNO] 持续识别出错: {e}")
+    finally:
+        # 关闭截图对象
+        scr.close()
+        print("🎮 [UNO] 持续识别停止")
+
+# 启动UNO持续识别
+def uno_start_continuous_recognition():
+    """启动UNO持续识别
+    
+    该函数负责创建和启动持续识别线程
+    """
+    global uno_recognition_running, uno_recognition_thread
+    
+    if not uno_recognition_running:
+        # 设置识别状态为True
+        uno_recognition_running = True
+        
+        # 创建并启动线程
+        import threading
+        uno_recognition_thread = threading.Thread(
+            target=uno_continuous_recognition,
+            daemon=True
+        )
+        uno_recognition_thread.start()
+        
+        print("🎮 [UNO] 持续识别已启动")
+        return True
+    else:
+        print("🎮 [UNO] 持续识别已在运行")
+        return False
+
+# 停止UNO持续识别
+def uno_stop_continuous_recognition():
+    """停止UNO持续识别
+    
+    该函数负责停止持续识别线程
+    """
+    global uno_recognition_running, uno_recognition_thread
+    
+    if uno_recognition_running:
+        # 设置识别状态为False
+        uno_recognition_running = False
+        
+        # 等待线程结束
+        if uno_recognition_thread is not None:
+            uno_recognition_thread.join(timeout=1.0)  # 等待1秒
+            uno_recognition_thread = None
+        
+        print("🎮 [UNO] 持续识别已停止")
+        return True
+    else:
+        print("🎮 [UNO] 持续识别未在运行")
+        return False
+
+# UNO弹窗函数
+def uno_show_popup():
+    """显示UNO暂停/继续弹窗
+    
+    弹窗3秒后自动选择继续
+    """
+    # 不直接使用global root，改为检查root是否已定义
+    global root
+    if root is None:
+        print("⚠️ [UNO] 无法显示弹窗，root未定义")
+        return
+    
+    # 创建弹窗
+    popup = tk.Toplevel(root)
+    popup.title("🎮 UNO 提示")
+    popup.geometry("300x150")
+    popup.resizable(False, False)
+    popup.grab_set()  # 模态窗口
+    
+    # 设置样式
+    popup.configure(background="#2d3748")
+    
+    # 添加标题
+    title_label = ttkb.Label(
+        popup,
+        text="🎮 UNO 操作提示",
+        font=('Segoe UI', 12, 'bold'),
+        bootstyle="primary"
+    )
+    title_label.pack(pady=15)
+    
+    # 添加提示文本
+    text_label = ttkb.Label(
+        popup,
+        text="是否继续操作？",
+        font=('Segoe UI', 10),
+        bootstyle="light"
+    )
+    text_label.pack(pady=5)
+    
+    # 继续标志
+    continue_flag = [False]
+    
+    # 暂停按钮回调
+    def on_pause():
+        continue_flag[0] = False
+        print("🎮 [UNO] 用户选择暂停")
+        popup.destroy()
+    
+    # 继续按钮回调
+    def on_continue():
+        continue_flag[0] = True
+        print("🎮 [UNO] 用户选择继续")
+        popup.destroy()
+    
+    # 按钮框架
+    btn_frame = ttkb.Frame(popup)
+    btn_frame.pack(pady=20)
+    
+    # 暂停按钮
+    pause_btn = ttkb.Button(
+        btn_frame,
+        text="暂停",
+        bootstyle="danger",
+        width=10,
+        command=on_pause
+    )
+    pause_btn.pack(side=LEFT, padx=10)
+    
+    # 继续按钮
+    continue_btn = ttkb.Button(
+        btn_frame,
+        text="继续",
+        bootstyle="success",
+        width=10,
+        command=on_continue
+    )
+    continue_btn.pack(side=RIGHT, padx=10)
+    
+    # 设置3秒自动继续
+    popup.after(3000, on_continue)
+    
+    # 等待弹窗关闭
+    popup.wait_window()
+    
+    return continue_flag[0]
+
+
 def f2_mached(scr):
     global region5_coords, f2
     # 确保模板已加载
@@ -6900,7 +7310,16 @@ def check_hotkey_match(key):
         # 检查修饰键是否匹配
         if current_modifiers == uno_hotkey_modifiers:
             print(f"🎮 [UNO] 热键 {uno_hotkey_name} 被触发")
-            # 这里可以添加UNO功能的具体实现
+            # 切换持续识别状态
+            global uno_recognition_running
+            if uno_recognition_running:
+                # 如果正在识别，停止识别
+                uno_stop_continuous_recognition()
+                print("🎮 [UNO] 已停止持续识别")
+            else:
+                # 如果未在识别，启动识别
+                uno_start_continuous_recognition()
+                print("🎮 [UNO] 已启动持续识别")
             return
 
 
