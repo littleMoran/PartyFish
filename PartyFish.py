@@ -48,6 +48,8 @@ class SimpleSoundManager:
     def __init__(self):
         self.enabled = True
         self.can_use_winsound = False
+        self._playing = False  # 防止重复播放
+        self._lock = threading.Lock()  # 线程锁
 
         try:
             import winsound
@@ -75,32 +77,58 @@ class SimpleSoundManager:
 
     def play_start(self):
         """播放启动音效"""
-        if not self.enabled:
-            return
+        with self._lock:
+            if not self.enabled or self._playing:
+                return
+            self._playing = True
+
         # 在独立线程中播放，避免阻塞
-        threading.Thread(target=self._safe_beep, args=(1000, 200), daemon=True).start()
-        time.sleep(0.05)
-        threading.Thread(target=self._safe_beep, args=(1200, 150), daemon=True).start()
+        def _play():
+            try:
+                self._safe_beep(1000, 200)
+                time.sleep(0.05)
+                self._safe_beep(1200, 150)
+            finally:
+                with self._lock:
+                    self._playing = False
+
+        threading.Thread(target=_play, daemon=True).start()
 
     def play_pause(self):
         """播放暂停音效"""
-        if not self.enabled:
-            return
-        threading.Thread(target=self._safe_beep, args=(600, 200), daemon=True).start()
-        time.sleep(0.05)
-        threading.Thread(target=self._safe_beep, args=(500, 150), daemon=True).start()
+        with self._lock:
+            if not self.enabled or self._playing:
+                return
+            self._playing = True
+
+        def _play():
+            try:
+                self._safe_beep(600, 200)
+                time.sleep(0.05)
+                self._safe_beep(500, 150)
+            finally:
+                with self._lock:
+                    self._playing = False
+
+        threading.Thread(target=_play, daemon=True).start()
 
     def play_resume(self):
         """播放恢复音效"""
-        if not self.enabled:
-            return
-        threading.Thread(target=self._safe_beep, args=(800, 200), daemon=True).start()
-        time.sleep(0.05)
-        threading.Thread(target=self._safe_beep, args=(900, 150), daemon=True).start()
+        with self._lock:
+            if not self.enabled or self._playing:
+                return
+            self._playing = True
 
-    def set_enabled(self, enabled):
-        """启用或禁用音效"""
-        self.enabled = enabled
+        def _play():
+            try:
+                self._safe_beep(800, 200)
+                time.sleep(0.05)
+                self._safe_beep(900, 150)
+            finally:
+                with self._lock:
+                    self._playing = False
+
+        threading.Thread(target=_play, daemon=True).start()
 
 
 # 使用简化版
@@ -7489,10 +7517,23 @@ def main():
         if run_event.is_set():
             scr = None
             try:
+                # 创建新的截图对象，确保每次都是新鲜的
                 scr = mss.mss()
+
+                # 检查截图对象是否有效
+                if scr is None:
+                    print("⚠️  [警告] 截图对象创建失败")
+                    time.sleep(0.1)
+                    continue
 
                 # 先检查是否需要处理加时
                 if handle_jiashi_in_action(scr):
+                    # 确保释放截图对象
+                    try:
+                        scr.close()
+                    except:
+                        pass
+                    scr = None
                     continue
 
                 # 检测F1/F2抛竿
@@ -7524,7 +7565,13 @@ def main():
                 else:
                     current_result = previous_result  # 将当前数字设为上次的数字
                     time.sleep(0.1)
-                    continue  # 会在finally中关闭scr
+                    # 确保释放截图对象
+                    try:
+                        scr.close()
+                    except:
+                        pass
+                    scr = None
+                    continue
 
                 # 比较并执行操作
                 comparison_result = compare_results()
@@ -7560,6 +7607,10 @@ def main():
                     # continue会在finally中关闭scr
             except Exception as e:
                 print(f"❌ [错误] 主循环异常: {e}")
+                # 记录更详细的错误信息
+                import traceback
+
+                traceback.print_exc()
             finally:
                 # 确保mss资源被正确释放
                 if scr is not None:
