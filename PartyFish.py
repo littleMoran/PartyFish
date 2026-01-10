@@ -7,7 +7,6 @@ import numpy as np
 from PIL import Image
 import threading  # 用于在独立线程中运行脚本
 import ctypes
-import winsound  # 用于播放音效
 from pynput import keyboard, mouse  # 用于监听键盘和鼠标事件，支持热键和鼠标侧键操作
 
 # 初始化键盘和鼠标控制器
@@ -17,6 +16,14 @@ import datetime
 import re
 import queue  # 用于线程安全通信
 import random  # 添加随机模块用于时间抖动
+
+try:
+    import winsound
+
+    WINSOUND_AVAILABLE = True
+except ImportError:
+    WINSOUND_AVAILABLE = False
+    print("⚠️  [警告] 无法导入winsound，部分音效可能不可用")
 
 # 过滤libpng的iCCP警告（图片ICC配置文件问题）
 warnings.filterwarnings("ignore", message=".*iCCP.*")
@@ -30,6 +37,74 @@ import ttkbootstrap as ttkb
 from ttkbootstrap.constants import *
 import json  # 用于保存和加载参数
 import mss
+
+
+# =========================
+# 简化版音效管理器
+# =========================
+class SimpleSoundManager:
+    """简化版音效管理器，只使用winsound和控制台铃声"""
+
+    def __init__(self):
+        self.enabled = True
+        self.can_use_winsound = False
+
+        try:
+            import winsound
+
+            self.can_use_winsound = True
+            print("🔊 [音效] 使用winsound播放音效")
+        except ImportError:
+            print("🔊 [音效] 使用控制台铃声")
+
+    def _safe_beep(self, frequency, duration):
+        """安全的蜂鸣函数"""
+        if not self.enabled:
+            return
+
+        try:
+            if self.can_use_winsound:
+                import winsound
+
+                winsound.Beep(frequency, duration)
+            else:
+                print("\a", end="", flush=True)
+        except:
+            # 音效失败时静默处理
+            pass
+
+    def play_start(self):
+        """播放启动音效"""
+        if not self.enabled:
+            return
+        # 在独立线程中播放，避免阻塞
+        threading.Thread(target=self._safe_beep, args=(1000, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(1200, 150), daemon=True).start()
+
+    def play_pause(self):
+        """播放暂停音效"""
+        if not self.enabled:
+            return
+        threading.Thread(target=self._safe_beep, args=(600, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(500, 150), daemon=True).start()
+
+    def play_resume(self):
+        """播放恢复音效"""
+        if not self.enabled:
+            return
+        threading.Thread(target=self._safe_beep, args=(800, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(900, 150), daemon=True).start()
+
+    def set_enabled(self, enabled):
+        """启用或禁用音效"""
+        self.enabled = enabled
+
+
+# 使用简化版
+sound_manager = SimpleSoundManager()
 
 
 # =========================
@@ -3021,23 +3096,44 @@ def create_gui():
     # 当前牌数
     uno_input1_frame = ttkb.Frame(uno_inputs_frame)
     uno_input1_frame.pack(fill=X, pady=4)
-    uno_input1_label = ttkb.Label(uno_input1_frame, text="当前牌数:", font=('Segoe UI', 9), bootstyle="primary", width=8)
+    uno_input1_label = ttkb.Label(
+        uno_input1_frame,
+        text="当前牌数:",
+        font=("Segoe UI", 9),
+        bootstyle="primary",
+        width=8,
+    )
     uno_input1_label.pack(side=LEFT, padx=(0, 8))
     uno_input1_var = ttkb.IntVar(value=7)
     uno_input1_spacer = ttkb.Frame(uno_input1_frame)
     uno_input1_spacer.pack(side=LEFT, fill=X, expand=YES)
-    uno_input1 = ttkb.Entry(uno_input1_frame, textvariable=uno_input1_var, width=2, font=('Segoe UI', 9), bootstyle="light", state="readonly") 
+    uno_input1 = ttkb.Entry(
+        uno_input1_frame,
+        textvariable=uno_input1_var,
+        width=2,
+        font=("Segoe UI", 9),
+        bootstyle="light",
+        state="readonly",
+    )
     uno_input1.pack(side=RIGHT, padx=(0, 5))  # 靠右显示，右边间距5
 
-    #抽取牌数次数
+    # 抽取牌数次数
     uno_input2_frame = ttkb.Frame(uno_inputs_frame)
     uno_input2_frame.pack(fill=X, pady=4)
-    uno_input2_label = ttkb.Label(uno_input2_frame, text="抽取牌数:", font=('Segoe UI', 9), bootstyle="primary", width=8)
+    uno_input2_label = ttkb.Label(
+        uno_input2_frame,
+        text="抽取牌数:",
+        font=("Segoe UI", 9),
+        bootstyle="primary",
+        width=8,
+    )
     uno_input2_label.pack(side=LEFT, padx=(0, 8))
     uno_input2_var = ttkb.IntVar(value=35)
     uno_input2_spacer = ttkb.Frame(uno_input2_frame)
     uno_input2_spacer.pack(side=LEFT, fill=X, expand=YES)
-    uno_input2 = ttkb.Entry(uno_input2_frame, textvariable=uno_input2_var, width=2, bootstyle="primary")  
+    uno_input2 = ttkb.Entry(
+        uno_input2_frame, textvariable=uno_input2_var, width=2, bootstyle="primary"
+    )
     uno_input2.pack(side=RIGHT, padx=(0, 5))  # 靠右显示，右边间距5
 
     # ==================== 右侧面板（钓鱼记录区域） ====================
@@ -5418,21 +5514,6 @@ def record_caught_fish():
         return None
 
 
-def check_fish_bucket_full(scr_param=None):
-    """检查鱼桶是否已满
-
-    Args:
-        scr_param: 截图对象，如果为None则使用全局scr对象（已弃用）
-
-    Returns:
-        bool: 如果检测到鱼桶满则返回True，否则返回False
-    """
-    global fish_bucket_full_detected
-
-    # 直接返回通过抛竿间隔检测的结果
-    return fish_bucket_full_detected or bucket_full_by_interval
-
-
 def play_fish_bucket_warning_sound():
     """播放鱼桶满/没鱼饵警告!音效"""
     if not fish_bucket_sound_enabled:
@@ -5778,11 +5859,11 @@ def bucket_full_detection_thread():
                     # 额外验证：检查所有记录的循环是否都异常短
                     all_short = True
                     for i in range(1, len(timestamps)):
-                        interval = timestamps[i] - timestamps[i-1]
+                        interval = timestamps[i] - timestamps[i - 1]
                         if interval >= dynamic_threshold:
                             all_short = False
                             break
-                    
+
                     if all_short or len(timestamps) <= 5:  # 对于少量记录，直接判定
                         print(
                             f"🪣  [警告] 连续{short_cycle_count}次短循环，判定为鱼桶满/没鱼饵！"
@@ -6686,10 +6767,10 @@ def f1_mached(scr):
 # 识别UNO条
 def uno_recognize_tiao(scr):
     """识别UNO条模板
-    
+
     Args:
         scr: 截图对象
-    
+
     Returns:
         bool: 是否识别成功
     """
@@ -6698,17 +6779,17 @@ def uno_recognize_tiao(scr):
     if tiao_template is None:
         print("⚠️ [UNO] 模板未加载，尝试重新加载...")
         load_tiao_template()
-    
+
     if tiao_template is None:
         print("❌ [UNO] 模板加载失败，无法识别")
         return False
-    
+
     # 捕获指定区域：2243, 1313, 264, 90
     region_gray = capture_region(2242, 1314, 284, 100, scr)
     if region_gray is None:
         print("❌ [UNO] 区域捕获失败")
         return False
-    
+
     # 执行模板匹配
     h, w = region_gray.shape[:2]
     t_h, t_w = tiao_template.shape[:2]
@@ -6717,14 +6798,17 @@ def uno_recognize_tiao(scr):
             cv2.matchTemplate(region_gray, tiao_template, cv2.TM_CCOEFF_NORMED)
         )[1]
         is_match = match_result > 0.8
-        print(f"🎮 [UNO] 识别结果: {'成功' if is_match else '失败'} (匹配度: {match_result:.2f})")
+        print(
+            f"🎮 [UNO] 识别结果: {'成功' if is_match else '失败'} (匹配度: {match_result:.2f})"
+        )
         return is_match
     return False
+
 
 # 加载UNO条模板
 def load_tiao_template():
     """加载UNO条模板
-    
+
     Returns:
         numpy.ndarray: 加载的模板
     """
@@ -6733,96 +6817,100 @@ def load_tiao_template():
         try:
             tiao_path = os.path.join(template_folder_path, "tiao.png")
             img = Image.open(tiao_path)
-            
+
             # 无论原图是什么格式，都转换为灰度图像
-            if img.mode != 'L':
-                img = img.convert('L')
-            
+            if img.mode != "L":
+                img = img.convert("L")
+
             template = np.array(img)
             scale = SCALE_UNIFORM
             tiao_template = scale_template(template, scale, scale)
-            
+
             # 确保模板是CV_8U格式（8位无符号整数）
             if tiao_template.dtype != np.uint8:
                 tiao_template = tiao_template.astype(np.uint8)
                 print(f"🔧 [UNO] 模板格式转换: {tiao_template.dtype} → uint8")
-            
+
             # 确保模板是单通道灰度图像
             if len(tiao_template.shape) > 2:
                 tiao_template = cv2.cvtColor(tiao_template, cv2.COLOR_BGR2GRAY)
                 print(f"🔧 [UNO] 模板通道转换: {tiao_template.shape} → 单通道")
-            
+
             print("✅ [UNO] 模板加载成功")
         except Exception as e:
             print(f"❌ [UNO] 模板加载失败: {e}")
             tiao_template = None
     return tiao_template
 
+
 # 计算UNO点击位置
 def calculate_click_position():
     """根据当前分辨率计算UNO点击位置
-    
+
     Returns:
         tuple: (x, y) 点击位置
     """
     global SCALE_X, SCALE_Y
-    
+
     # 2K分辨率(2560×1440)下的原始位置
     base_x = 2381
     base_y = 1353
     base_resolution = (2560, 1440)
-    
+
     # 获取当前分辨率
     current_width, current_height = get_current_screen_resolution()
-    
+
     # 如果是2K分辨率，直接返回原始位置
     if current_width == base_resolution[0] and current_height == base_resolution[1]:
         print(f"🎮 [UNO] 2K分辨率，使用原始位置: ({base_x}, {base_y})")
         return (base_x, base_y)
-    
+
     # 其他分辨率使用缩放计算
     # 计算缩放比例
     scale_x = SCALE_X
     scale_y = SCALE_Y
-    
+
     # 计算点击位置
     click_x = int(base_x * scale_x)
     click_y = int(base_y * scale_y)
-    
-    print(f"🎮 [UNO] 分辨率 {current_width}×{current_height}，缩放比例 X={scale_x:.2f}, Y={scale_y:.2f}，点击位置: ({click_x}, {click_y})")
+
+    print(
+        f"🎮 [UNO] 分辨率 {current_width}×{current_height}，缩放比例 X={scale_x:.2f}, Y={scale_y:.2f}，点击位置: ({click_x}, {click_y})"
+    )
     return (click_x, click_y)
+
 
 # UNO主处理函数
 def uno_process(scr):
     """处理UNO卡识别和计数
-    
+
     Args:
         scr: 截图对象
-    
+
     Returns:
         bool: 是否处理成功
     """
     global uno_input1_var, uno_input2_var
-    
+
     # 检查变量是否已初始化
     if uno_input1_var is None or uno_input2_var is None:
         print("❌ [UNO] 计数变量未初始化")
         return False
-    
+
     # 识别UNO条
     if uno_recognize_tiao(scr):
         # 获取当前牌数和抽取牌数
         current_cards = uno_input1_var.get()
         max_cards = uno_input2_var.get()
-        
+
         print(f"🎮 [UNO] 当前牌数: {current_cards}, 抽取牌数: {max_cards}")
-        
+
         # 如果当前牌数 < 抽取牌数，当前牌数+1
         if current_cards < max_cards:
             new_cards = current_cards + 1
             uno_input1_var.set(new_cards)
             print(f"🎮 [UNO] 牌数更新: {current_cards} → {new_cards}")
-            
+
             # 检查是否达到抽取牌数
             if new_cards >= max_cards:
                 print(f"🎮 [UNO] 已达到抽取牌数: {new_cards}/{max_cards}")
@@ -6832,28 +6920,29 @@ def uno_process(scr):
             print(f"🎮 [UNO] 已达到抽取牌数: {current_cards}/{max_cards}")
             # 显示弹窗
             uno_show_popup()
-        
+
         return True
     return False
+
 
 # UNO持续识别函数
 def uno_continuous_recognition():
     """持续识别UNO卡并执行点击操作
-    
+
     该函数在单独线程中运行，直到uno_recognition_running为False
     """
     global uno_recognition_running
-    
+
     print("🎮 [UNO] 开始持续识别")
-    
+
     # 导入pyautogui用于点击操作
     import pyautogui
     import time
     import mss
-    
+
     # 创建截图对象
     scr = mss.mss()
-    
+
     try:
         while uno_recognition_running:
             # 识别UNO条
@@ -6861,22 +6950,22 @@ def uno_continuous_recognition():
                 # 获取当前牌数和抽取牌数
                 current_cards = uno_input1_var.get()
                 max_cards = uno_input2_var.get()
-                
+
                 print(f"🎮 [UNO] 当前牌数: {current_cards}, 抽取牌数: {max_cards}")
-                
+
                 # 如果当前牌数 < 抽取牌数，当前牌数+1并执行点击
                 if current_cards < max_cards:
                     new_cards = current_cards + 1
                     uno_input1_var.set(new_cards)
                     print(f"🎮 [UNO] 牌数更新: {current_cards} → {new_cards}")
-                    
+
                     # 计算点击位置
                     click_x, click_y = calculate_click_position()
-                    
+
                     # 执行点击操作
                     pyautogui.click(click_x, click_y)
                     print(f"🎮 [UNO] 执行点击: ({click_x}, {click_y})")
-                    
+
                     # 检查是否达到抽取牌数
                     if new_cards >= max_cards:
                         print(f"🎮 [UNO] 已达到抽取牌数: {new_cards}/{max_cards}")
@@ -6886,7 +6975,7 @@ def uno_continuous_recognition():
                     print(f"🎮 [UNO] 已达到抽取牌数: {current_cards}/{max_cards}")
                     # 显示弹窗
                     uno_show_popup()
-            
+
             # 延迟一段时间，避免过于频繁的识别
             time.sleep(0.5)
     except Exception as e:
@@ -6896,59 +6985,62 @@ def uno_continuous_recognition():
         scr.close()
         print("🎮 [UNO] 持续识别停止")
 
+
 # 启动UNO持续识别
 def uno_start_continuous_recognition():
     """启动UNO持续识别
-    
+
     该函数负责创建和启动持续识别线程
     """
     global uno_recognition_running, uno_recognition_thread
-    
+
     if not uno_recognition_running:
         # 设置识别状态为True
         uno_recognition_running = True
-        
+
         # 创建并启动线程
         import threading
+
         uno_recognition_thread = threading.Thread(
-            target=uno_continuous_recognition,
-            daemon=True
+            target=uno_continuous_recognition, daemon=True
         )
         uno_recognition_thread.start()
-        
+
         print("🎮 [UNO] 持续识别已启动")
         return True
     else:
         print("🎮 [UNO] 持续识别已在运行")
         return False
 
+
 # 停止UNO持续识别
 def uno_stop_continuous_recognition():
     """停止UNO持续识别
-    
+
     该函数负责停止持续识别线程
     """
     global uno_recognition_running, uno_recognition_thread
-    
+
     if uno_recognition_running:
         # 设置识别状态为False
         uno_recognition_running = False
-        
+
         # 等待线程结束
         if uno_recognition_thread is not None:
             uno_recognition_thread.join(timeout=1.0)  # 等待1秒
             uno_recognition_thread = None
-        
+
         print("🎮 [UNO] 持续识别已停止")
         return True
     else:
         print("🎮 [UNO] 持续识别未在运行")
         return False
 
+
 # UNO弹窗函数
 def uno_show_popup():
     """显示UNO暂停/继续弹窗
-    
+
     弹窗3秒后自动选择继续
     """
     # 不直接使用global root，改为检查root是否已定义
@@ -6956,80 +7048,69 @@ def uno_show_popup():
     if root is None:
         print("⚠️ [UNO] 无法显示弹窗，root未定义")
         return
-    
+
     # 创建弹窗
     popup = tk.Toplevel(root)
     popup.title("🎮 UNO 提示")
     popup.geometry("300x150")
     popup.resizable(False, False)
     popup.grab_set()  # 模态窗口
-    
+
     # 设置样式
     popup.configure(background="#2d3748")
-    
+
     # 添加标题
     title_label = ttkb.Label(
         popup,
         text="🎮 UNO 操作提示",
-        font=('Segoe UI', 12, 'bold'),
-        bootstyle="primary"
+        font=("Segoe UI", 12, "bold"),
+        bootstyle="primary",
     )
     title_label.pack(pady=15)
-    
+
     # 添加提示文本
     text_label = ttkb.Label(
-        popup,
-        text="是否继续操作？",
-        font=('Segoe UI', 10),
-        bootstyle="light"
+        popup, text="是否继续操作？", font=("Segoe UI", 10), bootstyle="light"
     )
     text_label.pack(pady=5)
-    
+
     # 继续标志
     continue_flag = [False]
-    
+
     # 暂停按钮回调
     def on_pause():
         continue_flag[0] = False
         print("🎮 [UNO] 用户选择暂停")
         popup.destroy()
-    
+
     # 继续按钮回调
     def on_continue():
         continue_flag[0] = True
         print("🎮 [UNO] 用户选择继续")
         popup.destroy()
-    
+
     # 按钮框架
     btn_frame = ttkb.Frame(popup)
     btn_frame.pack(pady=20)
-    
+
     # 暂停按钮
     pause_btn = ttkb.Button(
-        btn_frame,
-        text="暂停",
-        bootstyle="danger",
-        width=10,
-        command=on_pause
+        btn_frame, text="暂停", bootstyle="danger", width=10, command=on_pause
     )
     pause_btn.pack(side=LEFT, padx=10)
-    
+
     # 继续按钮
     continue_btn = ttkb.Button(
-        btn_frame,
-        text="继续",
-        bootstyle="success",
-        width=10,
-        command=on_continue
+        btn_frame, text="继续", bootstyle="success", width=10, command=on_continue
     )
     continue_btn.pack(side=RIGHT, padx=10)
-    
+
     # 设置3秒自动继续
     popup.after(3000, on_continue)
-    
+
     # 等待弹窗关闭
     popup.wait_window()
-    
+
     return continue_flag[0]
 
 
@@ -7160,19 +7241,12 @@ def toggle_run():
         previous_result = None
         ensure_mouse_up()  # 确保鼠标没有按下
         end_current_session()  # 结束钓鱼会话
-        print("⏸️  [状态] 脚本已暂停")
-        # 播放暂停提示音（叮一声）
-        try:
-            import winsound
 
-            winsound.Beep(1000, 200)  # 频率1000Hz，持续200ms，模拟叮的声音
-        except Exception as e:
-            print(f"⚠️  [警告] 播放暂停提示音失败: {e}")
-            # 备选方案：使用控制台铃声
-            try:
-                print("\a", end="", flush=True)  # 控制台铃声
-            except:
-                pass
+        # 播放暂停音效
+        sound_manager.play_pause()
+
+        print("⏸️  [状态] 脚本已暂停")
+
     else:
         # 重置鱼桶满检测状态
         reset_fish_bucket_full_detection()
@@ -7186,19 +7260,12 @@ def toggle_run():
                 if bait_result is not None:
                     previous_result = result_val_is
                     run_event.set()  # 恢复运行
-                    print("▶️  [状态] 脚本开始运行")
-                    # 播放开始提示音（叮一声）
-                    try:
-                        import winsound
 
-                        winsound.Beep(1500, 200)  # 频率1500Hz，持续200ms，模拟叮的声音
-                    except Exception as e:
-                        print(f"⚠️  [警告] 播放开始提示音失败: {e}")
-                        # 备选方案：使用控制台铃声
-                        try:
-                            print("\a", end="", flush=True)  # 控制台铃声
-                        except:
-                            pass
+                    # 播放启动音效
+                    sound_manager.play_start()
+
+                    print("▶️  [状态] 脚本开始运行")
+
                 else:
                     time.sleep(0.1)
                     print("⚠️  [警告] 未识别到鱼饵，请确保游戏界面正确")
@@ -7213,19 +7280,9 @@ def toggle_run():
                 scr = None
         else:
             run_event.set()
+            # 播放恢复音效
+            sound_manager.play_resume()
             print("▶️  [状态] 脚本继续运行")
-            # 播放继续提示音（叮一声）
-            try:
-                import winsound
-
-                winsound.Beep(1500, 200)  # 频率1500Hz，持续200ms，模拟叮的声音
-            except Exception as e:
-                print(f"⚠️  [警告] 播放继续提示音失败: {e}")
-                # 备选方案：使用控制台铃声
-                try:
-                    print("\a", end="", flush=True)  # 控制台铃声
-                except:
-                    pass
 
 
 def on_press(key):
@@ -7436,11 +7493,6 @@ def main():
 
                 # 先检查是否需要处理加时
                 if handle_jiashi_in_action(scr):
-                    continue
-
-                # 检测鱼桶是否已满
-                if check_fish_bucket_full(scr):
-                    # 鱼桶已满/没鱼饵/没鱼饵，脚本会自动停止并播放音效
                     continue
 
                 # 检测F1/F2抛竿
