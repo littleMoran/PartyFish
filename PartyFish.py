@@ -48,8 +48,6 @@ class SimpleSoundManager:
     def __init__(self):
         self.enabled = True
         self.can_use_winsound = False
-        self._playing = False  # 防止重复播放
-        self._lock = threading.Lock()  # 线程锁
 
         try:
             import winsound
@@ -77,58 +75,32 @@ class SimpleSoundManager:
 
     def play_start(self):
         """播放启动音效"""
-        with self._lock:
-            if not self.enabled or self._playing:
-                return
-            self._playing = True
-
+        if not self.enabled:
+            return
         # 在独立线程中播放，避免阻塞
-        def _play():
-            try:
-                self._safe_beep(1000, 200)
-                time.sleep(0.05)
-                self._safe_beep(1200, 150)
-            finally:
-                with self._lock:
-                    self._playing = False
-
-        threading.Thread(target=_play, daemon=True).start()
+        threading.Thread(target=self._safe_beep, args=(1000, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(1200, 150), daemon=True).start()
 
     def play_pause(self):
         """播放暂停音效"""
-        with self._lock:
-            if not self.enabled or self._playing:
-                return
-            self._playing = True
-
-        def _play():
-            try:
-                self._safe_beep(600, 200)
-                time.sleep(0.05)
-                self._safe_beep(500, 150)
-            finally:
-                with self._lock:
-                    self._playing = False
-
-        threading.Thread(target=_play, daemon=True).start()
+        if not self.enabled:
+            return
+        threading.Thread(target=self._safe_beep, args=(600, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(500, 150), daemon=True).start()
 
     def play_resume(self):
         """播放恢复音效"""
-        with self._lock:
-            if not self.enabled or self._playing:
-                return
-            self._playing = True
+        if not self.enabled:
+            return
+        threading.Thread(target=self._safe_beep, args=(800, 200), daemon=True).start()
+        time.sleep(0.05)
+        threading.Thread(target=self._safe_beep, args=(900, 150), daemon=True).start()
 
-        def _play():
-            try:
-                self._safe_beep(800, 200)
-                time.sleep(0.05)
-                self._safe_beep(900, 150)
-            finally:
-                with self._lock:
-                    self._playing = False
-
-        threading.Thread(target=_play, daemon=True).start()
+    def set_enabled(self, enabled):
+        """启用或禁用音效"""
+        self.enabled = enabled
 
 
 # 使用简化版
@@ -451,31 +423,13 @@ config_names = ["配置1", "配置2", "配置3", "配置4"]
 # 配置参数，保存5个核心钓鱼参数
 config_params = [
     # 配置1
-    {"t": 0.3, "leftclickdown": 2.5, "leftclickup": 2, "times": 15, "paogantime": 0.5},
+    {"t": 0.9, "leftclickdown": 1, "leftclickup": 0.7, "times": 25, "paogantime": 2},
     # 配置2
-    {
-        "t": 0.3,
-        "leftclickdown": 2.0,
-        "leftclickup": 1.5,
-        "times": 20,
-        "paogantime": 0.5,
-    },
+    {"t": 0.5, "leftclickdown": 0.9,"leftclickup": 0.5,"times": 25,"paogantime": 3,},
     # 配置3
-    {
-        "t": 0.2,
-        "leftclickdown": 0.4,
-        "leftclickup": 0.2,
-        "times": 50,
-        "paogantime": 0.1,
-    },
+    {"t": 0.2,"leftclickdown": 0.4,"leftclickup": 0.2,"times": 25,"paogantime": 0.1,},
     # 配置4
-    {
-        "t": 0.2,
-        "leftclickdown": 1.5,
-        "leftclickup": 1.0,
-        "times": 25,
-        "paogantime": 0.5,
-    },
+    {"t": 0.2,"leftclickdown": 1.5,"leftclickup": 1.0,"times": 25,"paogantime": 0.1,},
 ]
 
 
@@ -6963,8 +6917,6 @@ def uno_continuous_recognition():
 
     print("🎮 [UNO] 开始持续识别")
 
-    # 导入pyautogui用于点击操作
-    import pyautogui
     import time
     import mss
 
@@ -6991,7 +6943,8 @@ def uno_continuous_recognition():
                     click_x, click_y = calculate_click_position()
 
                     # 执行点击操作
-                    pyautogui.click(click_x, click_y)
+                    mouse_controller.position = (click_x, click_y)
+                    mouse_controller.click(mouse.Button.left, 1)
                     print(f"🎮 [UNO] 执行点击: ({click_x}, {click_y})")
 
                     # 检查是否达到抽取牌数
@@ -7517,23 +7470,10 @@ def main():
         if run_event.is_set():
             scr = None
             try:
-                # 创建新的截图对象，确保每次都是新鲜的
                 scr = mss.mss()
-
-                # 检查截图对象是否有效
-                if scr is None:
-                    print("⚠️  [警告] 截图对象创建失败")
-                    time.sleep(0.1)
-                    continue
 
                 # 先检查是否需要处理加时
                 if handle_jiashi_in_action(scr):
-                    # 确保释放截图对象
-                    try:
-                        scr.close()
-                    except:
-                        pass
-                    scr = None
                     continue
 
                 # 检测F1/F2抛竿
@@ -7565,13 +7505,7 @@ def main():
                 else:
                     current_result = previous_result  # 将当前数字设为上次的数字
                     time.sleep(0.1)
-                    # 确保释放截图对象
-                    try:
-                        scr.close()
-                    except:
-                        pass
-                    scr = None
-                    continue
+                    continue  # 会在finally中关闭scr
 
                 # 比较并执行操作
                 comparison_result = compare_results()
@@ -7607,10 +7541,6 @@ def main():
                     # continue会在finally中关闭scr
             except Exception as e:
                 print(f"❌ [错误] 主循环异常: {e}")
-                # 记录更详细的错误信息
-                import traceback
-
-                traceback.print_exc()
             finally:
                 # 确保mss资源被正确释放
                 if scr is not None:
