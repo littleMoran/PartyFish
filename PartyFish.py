@@ -5738,7 +5738,7 @@ def handle_fish_bucket_full():
         # 保持检测状态为True，避免重复触发
         fish_bucket_full_detected = True
     elif bucket_detection_mode == "mode2":
-        # 模式2：F键+左键模式 - 按下一次F键然后一直点击鼠标左键，遇到键盘活动自动停止
+        # 模式2：F键+WASD循环模式 - 按下一次F键然后一直循环点击WASD，遇到键盘活动自动停止
         play_fish_bucket_warning_sound()
 
         try:
@@ -5754,21 +5754,28 @@ def handle_fish_bucket_full():
             # 键盘按下事件处理
             def on_key_press(key):
                 """键盘按下事件处理"""
-                print("⌨️  [检测] 键盘活动，停止鼠标点击")
-                keyboard_activity[0] = True
-                return False  # 停止监听器
+                try:
+                    # 只响应实际的键盘按键，忽略程序模拟的按键
+                    print("⌨️  [检测] 键盘活动，停止WASD循环点击")
+                    keyboard_activity[0] = True
+                    return False  # 停止监听器
+                except Exception as e:
+                    return True  # 继续监听
 
             # 启动键盘监听器
-            keyboard_listener = keyboard.Listener(on_press=on_key_press)
+            keyboard_listener = keyboard.Listener(on_press=on_key_press, suppress=False)
             keyboard_listener.start()
 
             print("⌨️  [操作] 开始WASD循环点击，1秒/循环，直到检测到键盘活动")
 
             # 一直循环点击WASD，直到检测到键盘活动
-            while not keyboard_activity[0] and keyboard_listener.is_alive():
+            while not keyboard_activity[0]:
                 # 定义WASD键列表
                 keys = ["w", "a", "s", "d"]
-
+                
+                # 暂停键盘监听器，避免自己的按键操作触发停止
+                keyboard_listener.stop()
+                
                 # 循环点击每个键
                 for key in keys:
                     # 点击键
@@ -5777,14 +5784,22 @@ def handle_fish_bucket_full():
                     keyboard_controller.release(keyboard.KeyCode.from_char(key))
                     print(f"⌨️  [操作] 已点击{key}键")
                     time.sleep(0.5)  # 键之间的间隔
-
+                
+                # 重新启动键盘监听器，继续检测用户真实按键
+                if not keyboard_activity[0]:
+                    keyboard_listener = keyboard.Listener(on_press=on_key_press, suppress=False)
+                    keyboard_listener.start()
+                
                 time.sleep(0.5)
 
             print("⌨️  [操作] 已停止WASD循环点击")
 
             # 停止键盘监听器
-            if keyboard_listener.is_alive():
-                keyboard_listener.stop()
+            try:
+                if keyboard_listener.is_alive():
+                    keyboard_listener.stop()
+            except Exception as e:
+                pass
         except Exception as e:
             print(f"❌ [错误] 执行F键+左键模式时出错: {e}")
         # 模式2不自动暂停，重置检测状态
