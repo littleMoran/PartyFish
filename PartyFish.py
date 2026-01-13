@@ -5738,7 +5738,7 @@ def handle_fish_bucket_full():
         # 保持检测状态为True，避免重复触发
         fish_bucket_full_detected = True
     elif bucket_detection_mode == "mode2":
-        # 模式2：F键+WASD循环模式 - 按下一次F键然后一直循环点击WASD，遇到键盘活动自动停止
+        # 模式2：F键+定期鼠标点击模式 - 按下一次F键然后每隔一段时间点击屏幕，遇到键盘活动自动停止
         play_fish_bucket_warning_sound()
 
         try:
@@ -5756,7 +5756,7 @@ def handle_fish_bucket_full():
                 """键盘按下事件处理"""
                 try:
                     # 只响应实际的键盘按键，忽略程序模拟的按键
-                    print("⌨️  [检测] 键盘活动，停止WASD循环点击")
+                    print("⌨️  [检测] 键盘活动，停止鼠标点击")
                     keyboard_activity[0] = True
                     return False  # 停止监听器
                 except Exception as e:
@@ -5766,33 +5766,32 @@ def handle_fish_bucket_full():
             keyboard_listener = keyboard.Listener(on_press=on_key_press, suppress=False)
             keyboard_listener.start()
 
-            print("⌨️  [操作] 开始WASD循环点击，1秒/循环，直到检测到键盘活动")
+            print("🖱️  [操作] 开始定期鼠标点击，5秒/次，直到检测到键盘活动")
 
-            # 一直循环点击WASD，直到检测到键盘活动
+            # 一直循环点击屏幕，直到检测到键盘活动
             while not keyboard_activity[0]:
-                # 定义WASD键列表
-                keys = ["w", "a", "s", "d"]
-                
-                # 暂停键盘监听器，避免自己的按键操作触发停止
+                # 暂停键盘监听器，避免自己的操作触发停止
                 keyboard_listener.stop()
                 
-                # 循环点击每个键
-                for key in keys:
-                    # 点击键
-                    keyboard_controller.press(keyboard.KeyCode.from_char(key))
-                    time.sleep(0.5)  # 按下持续时间
-                    keyboard_controller.release(keyboard.KeyCode.from_char(key))
-                    print(f"⌨️  [操作] 已点击{key}键")
-                    time.sleep(0.5)  # 键之间的间隔
+                # 获取屏幕中心位置
+                screen_width, screen_height = get_current_screen_resolution()
+                click_x = screen_width // 2
+                click_y = screen_height // 2
+                
+                # 执行鼠标点击
+                mouse_controller.position = (click_x, click_y)
+                mouse_controller.click(mouse.Button.left, 1)
+                print(f"🖱️  [操作] 已点击屏幕中心: ({click_x}, {click_y})")
+                
+                # 等待一段时间
+                time.sleep(5.0)  # 每隔2秒点击一次
                 
                 # 重新启动键盘监听器，继续检测用户真实按键
                 if not keyboard_activity[0]:
                     keyboard_listener = keyboard.Listener(on_press=on_key_press, suppress=False)
                     keyboard_listener.start()
-                
-                time.sleep(0.5)
 
-            print("⌨️  [操作] 已停止WASD循环点击")
+            print("🖱️  [操作] 已停止鼠标点击")
 
             # 停止键盘监听器
             try:
@@ -5801,7 +5800,7 @@ def handle_fish_bucket_full():
             except Exception as e:
                 pass
         except Exception as e:
-            print(f"❌ [错误] 执行F键+左键模式时出错: {e}")
+            print(f"❌ [错误] 执行F键+鼠标点击模式时出错: {e}")
         # 模式2不自动暂停，重置检测状态
         reset_fish_bucket_full_detection()
     elif bucket_detection_mode == "mode3":
@@ -6830,10 +6829,22 @@ def uno_recognize_tiao(scr):
         print("❌ [UNO] 模板加载失败，无法识别")
         return False
 
-    # 捕获指定区域：2243, 1313, 264, 90
-    region_gray = capture_region(2242, 1314, 284, 100, scr)
+    # 2K分辨率(2560×1440)下的原始坐标
+    base_x = 2242
+    base_y = 1314
+    base_width = 284
+    base_height = 100
+    
+    # 使用缩放后的坐标
+    scaled_x = int(base_x * SCALE_X)
+    scaled_y = int(base_y * SCALE_Y)
+    scaled_width = int(base_width * SCALE_X)
+    scaled_height = int(base_height * SCALE_Y)
+    
+    # 捕获缩放后的区域
+    region_gray = capture_region(scaled_x, scaled_y, scaled_width, scaled_height, scr)
     if region_gray is None:
-        print("❌ [UNO] 区域捕获失败")
+        print(f"❌ [UNO] 区域捕获失败 (缩放后: {scaled_x}, {scaled_y}, {scaled_width}, {scaled_height})")
         return False
 
     # 执行模板匹配
