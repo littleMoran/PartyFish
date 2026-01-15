@@ -5458,12 +5458,19 @@ def recognize_fish_info_ocr(img):
                     for quality in QUALITY_LEVELS:
                         if quality in extracted_name:
                             extracted_name = extracted_name.replace(quality, " ")
+                    # 清理鱼名中的多余字符，保留中文和英文
                     extracted_name = re.sub(
-                        r"[^\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
+                        r"[^\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
                         "",
                         extracted_name,
                     )
+                    # 移除多余空格，只保留必要的空格
                     extracted_name = re.sub(r"\s+", " ", extracted_name).strip()
+                    # 移除单个字符（可能是OCR误识别）
+                    if extracted_name:
+                        words = extracted_name.split()
+                        filtered_words = [word for word in words if len(word) > 1 or word in ["a", "A"]]
+                        extracted_name = " ".join(filtered_words).strip()
                     if extracted_name and len(extracted_name) >= 2:
                         fish_name = extracted_name
                         # 特别处理美髯公，确保能被正确识别
@@ -5495,12 +5502,17 @@ def recognize_fish_info_ocr(img):
                 )
                 # 清理特殊字符，保留中文和英文（包括繁体）
                 name_text = re.sub(
-                    r"[^\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
+                    r"[^\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
                     " ",
                     name_text,
                 )
                 # 移除多余空格
                 name_text = re.sub(r"\s+", " ", name_text).strip()
+                # 移除单个字符（可能是OCR误识别）
+                if name_text:
+                    words = name_text.split()
+                    filtered_words = [word for word in words if len(word) > 1 or word in ["a", "A"]]
+                    name_text = " ".join(filtered_words).strip()
 
                 # 改进的鱼名提取逻辑
                 # 1. 尝试直接使用清理后的文本作为鱼名
@@ -5545,12 +5557,17 @@ def recognize_fish_info_ocr(img):
                     clean_text = clean_text.replace(prefix, " ")
                 # 清理特殊字符
                 clean_text = re.sub(
-                    r"[^\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
+                    r"[^\u4e00-\u9fff\uf900-\ufaffa-zA-Z\s]",
                     " ",
                     clean_text,
                 )
                 # 移除多余空格
                 clean_text = re.sub(r"\s+", " ", clean_text).strip()
+                # 移除单个字符（可能是OCR误识别）
+                if clean_text:
+                    words = clean_text.split()
+                    filtered_words = [word for word in words if len(word) > 1 or word in ["a", "A"]]
+                    clean_text = " ".join(filtered_words).strip()
                 # 直接使用清理后的文本作为鱼名（如果长度合适）
                 if clean_text and len(clean_text) >= 2:
                     fish_name = clean_text
@@ -5899,7 +5916,7 @@ def record_caught_fish():
 
                     # 生成截图文件名（包含时间戳和鱼名）
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    fish_name_clean = re.sub(r"[^]", "", fish.name)
+                    fish_name_clean = re.sub(r"[^\w\s]", "", fish.name)
                     screenshot_path = os.path.join(
                         screenshot_dir,
                         f"{timestamp}_{fish_name_clean}_首次捕获.png",
