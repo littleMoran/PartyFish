@@ -344,7 +344,7 @@ release_uncommon_enabled = False  # 是否放生非凡鱼
 release_rare_enabled = False  # 是否放生稀有鱼
 release_epic_enabled = False  # 是否放生史诗鱼
 release_legendary_enabled = False  # 是否放生传奇鱼
-release_phantom_rare_enabled = False  # 是否放生六幻神稀有鱼
+release_phantom_rare_enabled = False  # 是否放生幻神稀有鱼
 
 # =========================
 # 字体大小设置
@@ -3301,11 +3301,11 @@ def create_gui():
     )
     uncommon_cb.pack(side=LEFT, padx=2)
 
-    # 六幻神稀有鱼
+    # 幻神稀有鱼
     release_phantom_rare_var = ttkb.BooleanVar(value=release_phantom_rare_enabled)
     phantom_rare_cb = ttkb.Checkbutton(
         release_quality_row1,
-        text="🔱 六幻神稀有",
+        text="🔱 幻神稀有",
         variable=release_phantom_rare_var,
         bootstyle="success",
     )
@@ -4624,10 +4624,10 @@ def should_release_fish(quality, fish_name=""):
         quality.replace("標準", "标准").replace("傳奇", "传奇").replace("史詩", "史诗")
     )
 
-    # 六幻神稀有鱼列表
-    phantom_rare_fishes = ["地包天鱼", "黄鸭叫", "辐射鲈", "鬼刀鱼", "鬼虎鱼", "鬼牙鱼"]
+    # 幻神稀有鱼列表
+    phantom_rare_fishes = ["地包天鱼", "黄鸭叫", "辐射鲈", "鬼刀鱼", "鬼虎鱼", "鬼牙鱼", "芭蕃蓬蓬鱼", "幻光鱼", "甲方满意鱼", "蓝眼泪", "飞机头", "鳅鳅鱼", "拟岩鱼", "粗红线", "水法老", "大罐子鱼"]
     
-    # 检查是否是六幻神稀有鱼
+    # 检查是否是幻神稀有鱼
     if fish_name in phantom_rare_fishes and release_phantom_rare_enabled:
         return True
     elif quality == "标准" and release_standard_enabled:
