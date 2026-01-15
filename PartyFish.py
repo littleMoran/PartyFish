@@ -5914,12 +5914,12 @@ def record_caught_fish():
                     screenshot_dir = os.path.join(".", "screenshots")
                     os.makedirs(screenshot_dir, exist_ok=True)
 
-                    # 生成截图文件名（包含时间戳和鱼名）
+                    # 生成截图文件名（包含时间戳、鱼名和品质）
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     fish_name_clean = re.sub(r"[^\w\s]", "", fish.name)
                     screenshot_path = os.path.join(
                         screenshot_dir,
-                        f"{timestamp}_{fish_name_clean}_首次捕获.png",
+                        f"{timestamp}_{fish_name_clean}_{fish.quality}_首次捕获.png",
                     )
 
                     # 保存截图
