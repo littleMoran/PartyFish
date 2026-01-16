@@ -4488,11 +4488,11 @@ def scale_position(x, y, w=0, h=0, anchor="center", coordinate_type="point"):
     if coordinate_type == "point":
         # 单点坐标处理
         if anchor == "center":
-            # 中心锚定
+            # 中心锚定 - 使用统一缩放比例
             center_offset_x = x - BASE_WIDTH / 2
             center_offset_y = y - BASE_HEIGHT / 2
-            scaled_x = int(TARGET_WIDTH / 2 + center_offset_x * SCALE_X)
-            scaled_y = int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_Y)
+            scaled_x = int(TARGET_WIDTH / 2 + center_offset_x * SCALE_UNIFORM)
+            scaled_y = int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_UNIFORM)
             return (scaled_x, scaled_y)
         elif anchor == "bottom_right":
             # 右下角锚定
@@ -4541,13 +4541,13 @@ def scale_position(x, y, w=0, h=0, anchor="center", coordinate_type="point"):
     else:
         # 区域坐标处理
         if anchor == "center":
-            # 中心锚定
+            # 中心锚定 - 使用统一缩放比例
             center_offset_x = x - BASE_WIDTH / 2
             center_offset_y = y - BASE_HEIGHT / 2
-            new_x = int(TARGET_WIDTH / 2 + center_offset_x * SCALE_X)
-            new_y = int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_Y)
-            new_w = int(w * SCALE_X)
-            new_h = int(h * SCALE_Y)
+            new_x = int(TARGET_WIDTH / 2 + center_offset_x * SCALE_UNIFORM)
+            new_y = int(TARGET_HEIGHT / 2 + center_offset_y * SCALE_UNIFORM)
+            new_w = int(w * SCALE_UNIFORM)
+            new_h = int(h * SCALE_UNIFORM)
             return (new_x, new_y, new_w, new_h)
         elif anchor == "bottom_right":
             # 右下角锚定
@@ -4643,9 +4643,9 @@ def release_fish():
         # 2. 识别 tong_gray.png 在区域 (1042,675,89,79)
         # 缩放识别区域
         scaled_x, scaled_y, scaled_w, scaled_h = scale_position(
-            1042, 675, 89, 79, anchor="top_left", coordinate_type="region"
+            1042, 675, 89, 79, anchor="center", coordinate_type="region"
         )
-        # 添加标志变量，跟踪是否识别到通
+        # 添加标志变量，跟踪是否识别到桶
         tong_detected = False
         
         # 截取指定区域
@@ -4682,20 +4682,20 @@ def release_fish():
         time.sleep(0.5)
 
 
-        # 只有识别到通时才执行后续操作
+        # 只有识别到桶时才执行后续操作
         if tong_detected:
-            # 4. 点击1930,590（右键）（使用与鱼饵识别相同的缩放逻辑）
+            # 4. 点击1930,590（右键） - 使用右下角锚定，更适合屏幕右侧元素
             scaled_x2, scaled_y2 = scale_position(
-                1930, 590, anchor="center", coordinate_type="point"
+                1930, 590, anchor="bottom_right", coordinate_type="point"
             )
             mouse_controller.position = (scaled_x2, scaled_y2)
             time.sleep(0.3)
             mouse_controller.click(mouse.Button.right, 1)
             time.sleep(0.3)
 
-            # 5. 点击2030,764（左键）（使用与鱼饵识别相同的缩放逻辑）
+            # 5. 点击2030,764（左键） - 使用右下角锚定，更适合屏幕右侧元素
             scaled_x3, scaled_y3 = scale_position(
-                2030, 764, anchor="center", coordinate_type="point"
+                2030, 764, anchor="bottom_right", coordinate_type="point"
             )
             mouse_controller.position = (scaled_x3, scaled_y3)
             time.sleep(0.3)
@@ -4706,13 +4706,13 @@ def release_fish():
             keyboard_controller.tap(keyboard.Key.esc)  # 使用tap方法，自动处理按下和释放
             time.sleep(0.5)  # 按下后等待
         else:
-            print("❌ [识别] 未识别到通，跳过后续操作")
+            print("❌ [识别] 未识别到桶，跳过后续操作")
 
         if tong_detected:
             print("✅ [放生] 放生操作执行成功")
             return True
         else:
-            print("❌ [放生] 未识别到通，放生操作失败")
+            print("❌ [放生] 未识别到桶，放生操作失败")
             return False
     except Exception as e:
         print(f"❌ [放生] 放生操作执行失败: {e}")
@@ -4815,69 +4815,31 @@ def scale_coords_center_anchored(base_x, base_y, base_w, base_h):
 # =========================
 def jiashi_scale_point(x, y):
     """加时功能专用的单点缩放函数"""
-    # 计算加时专用的缩放比例
-    # 基于2560×1440为基准，使用统一的缩放比例确保按钮位置准确
-    scale_x = TARGET_WIDTH / 2560
-    scale_y = TARGET_HEIGHT / 1440
-    # 使用统一的缩放比例，取最小值以适应不同宽高比
-    jiashi_scale = min(scale_x, scale_y)
-    return (int(x * jiashi_scale), int(y * jiashi_scale))
+    # 使用全局统一缩放比例
+    return (int(x * SCALE_UNIFORM), int(y * SCALE_UNIFORM))
 
 
 def jiashi_scale_region(x, y, w, h):
     """加时功能专用的区域缩放函数"""
-    # 计算加时专用的缩放比例
-    # 基于2560×1440为基准，使用统一的缩放比例确保区域位置准确
-    scale_x = TARGET_WIDTH / 2560
-    scale_y = TARGET_HEIGHT / 1440
-    # 使用统一的缩放比例，取最小值以适应不同宽高比
-    jiashi_scale = min(scale_x, scale_y)
+    # 使用全局统一缩放比例
     return (
-        int(x * jiashi_scale),
-        int(y * jiashi_scale),
-        int(w * jiashi_scale),
-        int(h * jiashi_scale),
+        int(x * SCALE_UNIFORM),
+        int(y * SCALE_UNIFORM),
+        int(w * SCALE_UNIFORM),
+        int(h * SCALE_UNIFORM),
     )
 
 
 def jiashi_scale_point_center_anchored(x, y):
     """加时功能专用的中心锚定单点缩放函数"""
-    # 计算加时专用的缩放比例
-    # 基于2560×1440为基准，使用统一的缩放比例确保按钮位置准确
-    scale_x = TARGET_WIDTH / 2560
-    scale_y = TARGET_HEIGHT / 1440
-    # 使用统一的缩放比例，取最小值以适应不同宽高比
-    jiashi_scale = min(scale_x, scale_y)
-
-    # 中心锚定计算
-    center_offset_x = x - 2560 / 2
-    center_offset_y = y - 1440 / 2
-
-    return (
-        int(TARGET_WIDTH / 2 + center_offset_x * jiashi_scale),
-        int(TARGET_HEIGHT / 2 + center_offset_y * jiashi_scale),
-    )
+    # 使用全局统一缩放比例
+    return scale_position(x, y, anchor="center", coordinate_type="point")
 
 
 def jiashi_scale_coords_center_anchored(x, y, w, h):
     """加时功能专用的中心锚定区域缩放函数"""
-    # 计算加时专用的缩放比例
-    # 基于2560×1440为基准，使用统一的缩放比例确保区域位置准确
-    scale_x = TARGET_WIDTH / 2560
-    scale_y = TARGET_HEIGHT / 1440
-    # 使用统一的缩放比例，取最小值以适应不同宽高比
-    jiashi_scale = min(scale_x, scale_y)
-
-    # 中心锚定计算
-    center_offset_x = x - 2560 / 2
-    center_offset_y = y - 1440 / 2
-
-    return (
-        int(TARGET_WIDTH / 2 + center_offset_x * jiashi_scale),
-        int(TARGET_HEIGHT / 2 + center_offset_y * jiashi_scale),
-        int(w * jiashi_scale),
-        int(h * jiashi_scale),
-    )
+    # 使用全局统一缩放比例
+    return scale_position(x, y, w, h, anchor="center", coordinate_type="region")
 
 
 def scale_coords_top_center(base_x, base_y, base_w, base_h):
@@ -4895,6 +4857,32 @@ def scale_coords_top_center(base_x, base_y, base_w, base_h):
     return (new_x, new_y, new_w, new_h)
 
 
+def get_jiashi_region_by_resolution():
+    """
+    根据当前分辨率返回对应的加时识别区域
+    返回: (x, y, w, h) 元组
+    """
+    # 获取当前屏幕分辨率
+    screen_width, screen_height = get_current_screen_resolution()
+    
+    # 定义分辨率到识别区域的映射字典
+    resolution_map = {
+        (1920, 1080): (933, 505, 22, 22),
+        (2560, 1440): (1244, 674, 29, 29),
+        (2560, 1600): (1244, 754, 29, 29),
+        (3840, 2160): (1865, 1012, 43, 43)
+    }
+    
+    # 根据当前分辨率返回对应的识别区域
+    if (screen_width, screen_height) in resolution_map:
+        return resolution_map[(screen_width, screen_height)]
+    else:
+        # 如果没有匹配的分辨率，使用默认的缩放逻辑
+        return scale_position(
+            *JIASHI_REGION_BASE, anchor="center", coordinate_type="region"
+        )
+
+
 def update_region_coords():
     """
     根据当前缩放比例更新所有区域坐标
@@ -4910,16 +4898,14 @@ def update_region_coords():
     region5_coords = scale_coords_bottom_anchored(1212, 1329, 10, 19)
     # 上鱼右键 - 底部中央区域
     region6_coords = scale_coords_bottom_anchored(1146, 1316, 17, 21)
-    # 加时界面检测区域 - 使用与鱼饵识别相同的缩放逻辑
-    jiashi_region_coords = scale_position(
-        *JIASHI_REGION_BASE, anchor="center", coordinate_type="region"
-    )
-    # 加时按钮坐标 - 使用与鱼饵识别相同的缩放逻辑
+    # 加时界面检测区域 - 根据分辨率使用预设值
+    jiashi_region_coords = get_jiashi_region_by_resolution()
+    # 加时按钮坐标 - 使用底部中心锚定，与识别区域保持一致
     btn_no_jiashi_coords = scale_position(
-        *BTN_NO_JIASHI_BASE, anchor="center", coordinate_type="point"
+        *BTN_NO_JIASHI_BASE, anchor="bottom_center", coordinate_type="point"
     )
     btn_yes_jiashi_coords = scale_position(
-        *BTN_YES_JIASHI_BASE, anchor="center", coordinate_type="point"
+        *BTN_YES_JIASHI_BASE, anchor="bottom_center", coordinate_type="point"
     )
     # 当坐标更新时，检查是否需要重新加载模板
     reload_templates_if_scale_changed()
@@ -6014,43 +6000,21 @@ def record_caught_fish():
         # 鼠标左键收起 - 截图完成后再收起
         print("🐠 [操作] 执行鼠标左键收起")
         
-        # 加载收起模板
-        shouqi_template_path = os.path.join(get_resources_path(), "shouqi_gray.png")
-        if os.path.exists(shouqi_template_path):
-            shouqi_template = cv2.imread(shouqi_template_path, cv2.IMREAD_GRAYSCALE)
-            if shouqi_template is not None:
-                # 使用与鱼饵识别相同的缩放比例（统一缩放）
-                scale = SCALE_UNIFORM
-                scaled_shouqi_template = scale_template(shouqi_template, scale, scale)
-                
-                # 捕获指定区域 (1183, 1325, 60, 30) 并使用统一缩放
-                region_x, region_y, region_w, region_h = scale_position(1183, 1324, 60, 30, coordinate_type="region")
-                
-                # 捕获区域图像
-                try:
-                    with mss.mss() as scr:
-                        region_gray = capture_region(region_x, region_y, region_w, region_h, scr)
-                        
-                        if region_gray is not None:
-                            # 进行模板匹配
-                            res = cv2.matchTemplate(region_gray, scaled_shouqi_template, cv2.TM_CCOEFF_NORMED)
-                            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-                            
-                            if max_val > 0.8:  # 匹配度大于0.8认为匹配成功
-                                # 计算实际点击位置
-                                click_x = region_x + max_loc[0] + scaled_shouqi_template.shape[1] // 2
-                                click_y = region_y + max_loc[1] + scaled_shouqi_template.shape[0] // 2
-                                
-                                # 执行点击
-                                mouse_controller.position = (click_x, click_y)
-                                time.sleep(0.3)
-                                mouse_controller.click(mouse.Button.left, 1)
-                                time.sleep(0.5)  # 增加延迟，确保左键点击完成
-                                print("🐠 [操作] 识别到收起按钮，执行点击")
-                            else:
-                                print("🐠 [操作] 未识别到收起按钮")
-                except Exception as e:
-                    print(f"🐠 [操作] 执行收起操作失败: {str(e)}")
+        try:
+            # 直接在屏幕中心执行收起操作
+            screen_width, screen_height = get_current_screen_resolution()
+            center_x = screen_width // 2
+            center_y = screen_height // 2
+            
+            # 执行点击
+            mouse_controller.position = (center_x, center_y)
+            time.sleep(0.3)
+            mouse_controller.click(mouse.Button.left, 1)
+            time.sleep(0.5)  # 增加延迟，确保左键点击完成
+            print("🐠 [操作] 在屏幕中心执行收起操作")
+        except Exception as e:
+            print(f"🐠 [操作] 执行收起操作失败: {str(e)}")
+            
 
         # 放生判断和执行
         if release_fish_enabled:  # 先检查全局开关是否开启
@@ -6558,7 +6522,7 @@ region6_coords = scale_coords_bottom_anchored(1146, 1316, 17, 21)  # 上鱼右�
 # 鱼饵数量区域（基准值）
 BAIT_REGION_BASE = (2318, 1296, 2348, 1318)
 # 加时界面检测区域（基准值）
-JIASHI_REGION_BASE = (1244, 676, 27, 28)
+JIASHI_REGION_BASE = (1244, 674, 29, 29)
 # 点击按钮位置（基准值）
 BTN_NO_JIASHI_BASE = (1175, 778)  # 不加时按钮
 BTN_YES_JIASHI_BASE = (1390, 778)  # 加时按钮
@@ -7005,10 +6969,25 @@ def load_shangyule():
 def load_jiashi():
     global jiashi
     jiashi_path = os.path.join(template_folder_path, "chang_grayscale.png")
+    
+
+    
     img = Image.open(jiashi_path)
     template = np.array(img)
-    scale = SCALE_UNIFORM
-    jiashi = scale_template(template, scale, scale)
+    
+    # 改进模板缩放方法，确保模板正确缩放
+    # 根据当前分辨率获取正确的缩放比例
+    screen_width, screen_height = get_current_screen_resolution()
+    if screen_width > screen_height:
+        scale = screen_width / BASE_WIDTH
+    else:
+        scale = screen_height / BASE_HEIGHT
+    
+    # 使用更精确的缩放方法
+    scaled_w = int(template.shape[1] * scale)
+    scaled_h = int(template.shape[0] * scale)
+    jiashi = cv2.resize(template, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
+    
     return jiashi
 
 
@@ -7027,9 +7006,13 @@ def handle_jiashi_in_action(scr):
     with param_lock:
         current_jiashi = jiashi_var
 
+    # 确保加时按钮坐标已初始化
+    if btn_no_jiashi_coords is None or btn_yes_jiashi_coords is None:
+        update_region_coords()
+
     if current_jiashi == 0:
         if fangzhu_jiashi(scr):
-            btn_x, btn_y = scale_point_center_anchored(*BTN_NO_JIASHI_BASE)
+            btn_x, btn_y = btn_no_jiashi_coords
             user32.SetCursorPos(btn_x, btn_y)
             time.sleep(0.05)
             user32.mouse_event(0x02, 0, 0, 0, 0)
@@ -7042,7 +7025,7 @@ def handle_jiashi_in_action(scr):
             return True
     elif current_jiashi == 1:
         if fangzhu_jiashi(scr):
-            btn_x, btn_y = scale_point_center_anchored(*BTN_YES_JIASHI_BASE)
+            btn_x, btn_y = btn_yes_jiashi_coords
             user32.SetCursorPos(btn_x, btn_y)
             time.sleep(0.05)
             user32.mouse_event(0x02, 0, 0, 0, 0)
@@ -7793,7 +7776,11 @@ def fangzhu_jiashi(scr):
 
     # 确保模板已加载
     if jiashi is None:
-        load_jiashi()
+        jiashi = load_jiashi()
+    
+    # 检查模板是否成功加载
+    if jiashi is None:
+        return False
 
     # 确保加时区域坐标已初始化
     if jiashi_region_coords is None:
@@ -7822,25 +7809,21 @@ def fangzhu_jiashi(scr):
         # 记录日志：识别失败
         if debug_mode:
             debug_info = {
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[
-                    :-3
-                ],
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "action": "jiashi_recognition_failed",
                 "message": "无法获取加时区域图像",
             }
             add_debug_info(debug_info)
-        return None
+        return False
 
     # 安全检查：确保图像尺寸大于等于模板尺寸
     h, w = region_gray.shape[:2]
     t_h, t_w = jiashi.shape[:2]
     if h >= t_h and w >= t_w:
-        result = (
-            cv2.minMaxLoc(cv2.matchTemplate(region_gray, jiashi, cv2.TM_CCOEFF_NORMED))[
-                1
-            ]
-            > 0.8
-        )
+        # 降低匹配阈值，提高识别率
+        match_result = cv2.matchTemplate(region_gray, jiashi, cv2.TM_CCOEFF_NORMED)
+        max_val = cv2.minMaxLoc(match_result)[1]
+        result = max_val > 0.8  # 降低阈值到0.8
     else:
         result = False
 
