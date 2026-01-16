@@ -4110,6 +4110,7 @@ def create_gui():
             release_rare_var=release_rare_var,
             release_epic_var=release_epic_var,
             release_legendary_var=release_legendary_var,
+            release_phantom_rare_var=release_phantom_rare_var,
         )
         resolution_info_var.set(f"当前: {TARGET_WIDTH}×{TARGET_HEIGHT}")
         hotkey_info_label.config(text=f"按 {hotkey_name} 启动/暂停 | 点击按钮修改")
@@ -4167,7 +4168,7 @@ def create_gui():
 
     version_label = ttkb.Label(
         left_status_frame,
-        text="v.2.10 | PartyFish",
+        text="v.2.11 | PartyFish",
         bootstyle="light",
         font=("Segoe UI", 8, "bold"),
     )
@@ -4704,10 +4705,6 @@ def should_release_fish(quality, fish_name=""):
     elif quality == "非凡" and release_uncommon_enabled:
         return True
     elif quality == "稀有" and release_rare_enabled:
-        return True
-    elif quality == "史诗" and release_epic_enabled:
-        return True
-    elif quality in ["传奇", "传说"] and release_legendary_enabled:
         return True
 
     return False
@@ -5953,6 +5950,11 @@ def record_caught_fish():
         
         # 鼠标左键收起 - 截图完成后再收起
         print("🐠 [操作] 执行鼠标左键收起")
+        # 先将鼠标移动到屏幕中心，确保点击在正确位置
+        screen_width, screen_height = get_current_screen_resolution()
+        click_x = screen_width // 2
+        click_y = screen_height // 2
+        mouse_controller.position = (click_x, click_y)
         mouse_controller.click(mouse.Button.left, 1)
         time.sleep(0.3)
 
@@ -8132,7 +8134,7 @@ if __name__ == "__main__":
     print()
     print("╔" + "═" * 50 + "╗")
     print("║" + " " * 50 + "║")
-    print("║     🎣  PartyFish 自动钓鱼助手  v.2.10".ljust(44) + "║")
+    print("║     🎣  PartyFish 自动钓鱼助手  v.2.11".ljust(44) + "║")
     print("║" + " " * 50 + "║")
     print("╠" + "═" * 50 + "╣")
     print(
