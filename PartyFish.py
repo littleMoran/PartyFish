@@ -236,6 +236,11 @@ CASTING_INTERVAL_THRESHOLD = 1.0  # 抛竿间隔阈值（秒）
 REQUIRED_CONSECUTIVE_MATCHES = 4  # 需要连续匹配的次数
 bucket_full_by_interval = False  # 标记是否通过间隔检测到鱼桶满/没鱼饵！
 
+# 操作状态标志，用于协调抛杆和放生操作
+is_casting = False  # 当前是否正在抛杆
+is_releasing = False  # 当前是否正在放生
+operation_lock = threading.Lock()  # 保护操作状态的线程锁
+
 
 # =========================
 # 调试信息管理函数
@@ -4604,10 +4609,30 @@ def release_fish():
     7. 按下ESC键
     """
     global release_fish_enabled, release_standard_enabled, release_uncommon_enabled, release_rare_enabled, release_epic_enabled, release_legendary_enabled
+    global is_casting, is_releasing, operation_lock
 
     try:
-        # 1. 按住C键
-        keyboard_controller.press(keyboard.KeyCode.from_char("c"))
+        # 检查是否正在抛杆，如果是则等待
+        with operation_lock:
+            while is_casting:
+                print("⏳ [提示] 正在抛杆，等待抛杆完成后再放生")
+                time.sleep(0.5)
+            # 设置放生状态
+            is_releasing = True
+        # 1. 将鼠标移动到屏幕中心，确保窗口焦点（不点击）
+        screen_width, screen_height = get_current_screen_resolution()
+        center_x = screen_width // 2
+        center_y = screen_height // 2
+        mouse_controller.position = (center_x, center_y)
+        time.sleep(0.3)
+        
+        # 2. 按住C键 - 提高可靠性
+        c_key = keyboard.KeyCode.from_char("c")
+        keyboard_controller.press(c_key)
+        time.sleep(0.1)  # 短暂延迟确保按键被按下
+        
+        # 再次按下确保按键状态正确
+        keyboard_controller.press(c_key)
         time.sleep(1)
 
         # 2. 识别 tong_gray.png 在区域 (1042,675,89,79)
@@ -4615,6 +4640,9 @@ def release_fish():
         scaled_x, scaled_y, scaled_w, scaled_h = scale_position(
             1042, 675, 89, 79, anchor="top_left", coordinate_type="region"
         )
+        # 添加标志变量，跟踪是否识别到通
+        tong_detected = False
+        
         # 截取指定区域
         region_gray = capture_region(scaled_x, scaled_y, scaled_w, scaled_h, scr)
         if region_gray is not None:
@@ -4629,6 +4657,7 @@ def release_fish():
                 res = cv2.matchTemplate(region_gray, tong_template, cv2.TM_CCOEFF_NORMED)
                 min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
                 if max_val > 0.8:  # 匹配度大于0.8认为匹配成功
+                    tong_detected = True
                     # 4. 点击1090,720（左键）
                     scaled_click_x, scaled_click_y = scale_position(
                         1090, 720, anchor="center", coordinate_type="point"
@@ -4639,41 +4668,56 @@ def release_fish():
                     time.sleep(0.3)
         time.sleep(0.5)
 
-        # 3. 松开C键
-        keyboard_controller.release(keyboard.KeyCode.from_char("c"))
-        time.sleep(0.3)
-
+        # 3. 松开C键 - 提高可靠性
+        keyboard_controller.release(c_key)
+        time.sleep(0.1)  # 短暂延迟确保按键被释放
+        
+        # 再次释放确保按键状态正确
+        keyboard_controller.release(c_key)
         time.sleep(0.5)
 
-        # 4. 点击1930,590（右键）（使用与鱼饵识别相同的缩放逻辑）
-        scaled_x2, scaled_y2 = scale_position(
-            1930, 590, anchor="center", coordinate_type="point"
-        )
-        mouse_controller.position = (scaled_x2, scaled_y2)
-        time.sleep(0.3)
-        mouse_controller.click(mouse.Button.right, 1)
-        time.sleep(0.3)
 
-        # 5. 点击2030,764（左键）（使用与鱼饵识别相同的缩放逻辑）
-        scaled_x3, scaled_y3 = scale_position(
-            2030, 764, anchor="center", coordinate_type="point"
-        )
-        mouse_controller.position = (scaled_x3, scaled_y3)
-        time.sleep(0.3)
-        mouse_controller.click(mouse.Button.left, 1)
-        time.sleep(0.3)
+        # 只有识别到通时才执行后续操作
+        if tong_detected:
+            # 4. 点击1930,590（右键）（使用与鱼饵识别相同的缩放逻辑）
+            scaled_x2, scaled_y2 = scale_position(
+                1930, 590, anchor="center", coordinate_type="point"
+            )
+            mouse_controller.position = (scaled_x2, scaled_y2)
+            time.sleep(0.3)
+            mouse_controller.click(mouse.Button.right, 1)
+            time.sleep(0.3)
 
-        # 6. 按下ESC键退出
-        keyboard_controller.tap(keyboard.Key.esc)  # 使用tap方法，自动处理按下和释放
-        time.sleep(0.5)  # 按下后等待
+            # 5. 点击2030,764（左键）（使用与鱼饵识别相同的缩放逻辑）
+            scaled_x3, scaled_y3 = scale_position(
+                2030, 764, anchor="center", coordinate_type="point"
+            )
+            mouse_controller.position = (scaled_x3, scaled_y3)
+            time.sleep(0.3)
+            mouse_controller.click(mouse.Button.left, 1)
+            time.sleep(0.3)
 
-        print("✅ [放生] 放生操作执行成功")
-        return True
+            # 6. 按下ESC键退出
+            keyboard_controller.tap(keyboard.Key.esc)  # 使用tap方法，自动处理按下和释放
+            time.sleep(0.5)  # 按下后等待
+        else:
+            print("❌ [识别] 未识别到通，跳过后续操作")
+
+        if tong_detected:
+            print("✅ [放生] 放生操作执行成功")
+            return True
+        else:
+            print("❌ [放生] 未识别到通，放生操作失败")
+            return False
     except Exception as e:
         print(f"❌ [放生] 放生操作执行失败: {e}")
         # 确保C键被释放
         keyboard_controller.release(keyboard.KeyCode.from_char("c"))
         return False
+    finally:
+        # 无论是否异常，都要重置放生状态
+        with operation_lock:
+            is_releasing = False
 
 
 def should_release_fish(quality, fish_name=""):
@@ -4689,10 +4733,17 @@ def should_release_fish(quality, fish_name=""):
     """
     global release_standard_enabled, release_uncommon_enabled, release_rare_enabled, release_epic_enabled, release_legendary_enabled, release_phantom_rare_enabled
 
-    # 处理繁体品质名称
+    # 处理品质名称，统一转换为标准格式
     quality = (
-        quality.replace("標準", "标准").replace("傳奇", "传奇").replace("史詩", "史诗")
+        quality.replace("標準", "标准")
+               .replace("傳奇", "传奇")
+               .replace("史詩", "史诗")
+               .replace("传说", "传奇")  # 合并传说和传奇为同一品质
     )
+
+    # 高品质鱼（史诗、传奇）直接返回False，不允许放生
+    if quality in ["史诗", "传奇"]:
+        return False
 
     # 幻神稀有鱼列表
     phantom_rare_fishes = ["地包天鱼", "黄鸭叫", "辐射鲈", "鬼刀鱼", "鬼虎鱼", "鬼牙鱼", "芭蕃蓬蓬鱼", "幻光鱼", "甲方满意鱼", "蓝眼泪", "飞机头", "鳅鳅鱼", "拟岩鱼", "粗红线", "水法老", "大罐子鱼", "粉丝虾", "狼蛛蟹", "金蛙", "拳击虾", "大师龟"]
@@ -5950,20 +6001,55 @@ def record_caught_fish():
         
         # 鼠标左键收起 - 截图完成后再收起
         print("🐠 [操作] 执行鼠标左键收起")
-        # 先将鼠标移动到屏幕中心，确保点击在正确位置
-        screen_width, screen_height = get_current_screen_resolution()
-        click_x = screen_width // 2
-        click_y = screen_height // 2
-        mouse_controller.position = (click_x, click_y)
-        mouse_controller.click(mouse.Button.left, 1)
-        time.sleep(0.3)
+        
+        # 加载收起模板
+        shouqi_template_path = os.path.join(get_resources_path(), "shouqi_gray.png")
+        if os.path.exists(shouqi_template_path):
+            shouqi_template = cv2.imread(shouqi_template_path, cv2.IMREAD_GRAYSCALE)
+            if shouqi_template is not None:
+                # 使用与鱼饵识别相同的缩放比例（统一缩放）
+                scale = SCALE_UNIFORM
+                scaled_shouqi_template = scale_template(shouqi_template, scale, scale)
+                
+                # 捕获指定区域 (1183, 1325, 60, 30) 并使用统一缩放
+                region_x, region_y, region_w, region_h = scale_position(1183, 1324, 60, 30, coordinate_type="region")
+                
+                # 捕获区域图像
+                try:
+                    with mss.mss() as scr:
+                        region_gray = capture_region(region_x, region_y, region_w, region_h, scr)
+                        
+                        if region_gray is not None:
+                            # 进行模板匹配
+                            res = cv2.matchTemplate(region_gray, scaled_shouqi_template, cv2.TM_CCOEFF_NORMED)
+                            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+                            
+                            if max_val > 0.8:  # 匹配度大于0.8认为匹配成功
+                                # 计算实际点击位置
+                                click_x = region_x + max_loc[0] + scaled_shouqi_template.shape[1] // 2
+                                click_y = region_y + max_loc[1] + scaled_shouqi_template.shape[0] // 2
+                                
+                                # 执行点击
+                                mouse_controller.position = (click_x, click_y)
+                                time.sleep(0.3)
+                                mouse_controller.click(mouse.Button.left, 1)
+                                time.sleep(0.5)  # 增加延迟，确保左键点击完成
+                                print("🐠 [操作] 识别到收起按钮，执行点击")
+                            else:
+                                print("🐠 [操作] 未识别到收起按钮")
+                except Exception as e:
+                    print(f"🐠 [操作] 执行收起操作失败: {str(e)}")
 
         # 放生判断和执行
         if release_fish_enabled:  # 先检查全局开关是否开启
             if should_release_fish(fish.quality, fish.name):  # 再检查鱼的稀有度
                 print(f"🐠 [放生] 开始放生 {fish.quality}品质的 {fish.name}")
-                release_fish()
-                print(f"🐠 [放生] {fish.quality}品质的 {fish.name} 放生成功")
+                # 执行放生操作
+                success = release_fish()
+                if success:
+                    print(f"🐠 [放生] {fish.quality}品质的 {fish.name} 放生成功")
+                else:
+                    print(f"🐠 [放生] {fish.quality}品质的 {fish.name} 放生失败")
         else:
             print(f"⏹️ [放生] 放生功能已禁用，跳过放生判断")
         # 通知GUI更新
@@ -8040,19 +8126,33 @@ def main():
 
                 # 检测F1/F2抛竿
                 if f1_mached(scr) or f2_mached(scr):
-                    # 在这里记录抛竿时间
-                    current_time = time.time()
-                    with casting_interval_lock:
-                        casting_timestamps.append(current_time)
-                        # 保持队列长度，防止内存泄露
-                        if len(casting_timestamps) > 20:
-                            casting_timestamps.pop(0)
-                    user32.mouse_event(0x02, 0, 0, 0, 0)
-                    jittered_pao = add_jitter(paogantime)
-                    time.sleep(jittered_pao)
-                    print_timing_info("抛竿", paogantime, jittered_pao)
-                    user32.mouse_event(0x04, 0, 0, 0, 0)
-                    time.sleep(0.15)
+                    # 检查是否正在放生，如果是则等待
+                    with operation_lock:
+                        if is_releasing:
+                            print("⏳ [提示] 正在放生，等待放生完成后再抛杆")
+                            time.sleep(0.5)
+                            continue
+                        # 设置抛杆状态
+                        is_casting = True
+                    
+                    try:
+                        # 在这里记录抛竿时间
+                        current_time = time.time()
+                        with casting_interval_lock:
+                            casting_timestamps.append(current_time)
+                            # 保持队列长度，防止内存泄露
+                            if len(casting_timestamps) > 20:
+                                casting_timestamps.pop(0)
+                        user32.mouse_event(0x02, 0, 0, 0, 0)
+                        jittered_pao = add_jitter(paogantime)
+                        time.sleep(jittered_pao)
+                        print_timing_info("抛竿", paogantime, jittered_pao)
+                        user32.mouse_event(0x04, 0, 0, 0, 0)
+                        time.sleep(0.15)
+                    finally:
+                        # 无论是否异常，都要重置抛杆状态
+                        with operation_lock:
+                            is_casting = False
                 elif shangyu_mached(scr):
                     user32.mouse_event(0x02, 0, 0, 0, 0)
                     time.sleep(0.1)
