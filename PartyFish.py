@@ -4611,6 +4611,7 @@ def release_fish():
     global release_fish_enabled, release_standard_enabled, release_uncommon_enabled, release_rare_enabled, release_epic_enabled, release_legendary_enabled
     global is_casting, is_releasing, operation_lock
 
+    scr = None
     try:
         # 检查是否正在抛杆，如果是则等待
         with operation_lock:
@@ -4619,6 +4620,10 @@ def release_fish():
                 time.sleep(0.5)
             # 设置放生状态
             is_releasing = True
+        
+        # 创建新的截图对象，确保每次都是新鲜的
+        scr = mss.mss()
+        
         # 1. 将鼠标移动到屏幕中心，确保窗口焦点（不点击）
         screen_width, screen_height = get_current_screen_resolution()
         center_x = screen_width // 2
@@ -4718,6 +4723,13 @@ def release_fish():
         # 无论是否异常，都要重置放生状态
         with operation_lock:
             is_releasing = False
+        
+        # 确保scr对象被正确关闭
+        if scr is not None:
+            try:
+                scr.close()
+            except:
+                pass
 
 
 def should_release_fish(quality, fish_name=""):
